@@ -12,7 +12,7 @@
 <script>
 // @ is an alias to /src
 
-  import Title from "@/components/Title.vue"
+import Title from "@/components/Title.vue";
 
 export default {
   name: "app",
@@ -22,10 +22,10 @@ export default {
 };
 </script>
 <style>
-  html {
-    background-color: black;
-  }
-  
+html {
+  background-color: black;
+}
+
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -33,7 +33,6 @@ export default {
   text-align: center;
   color: #2c3e50;
   background-color: black;
-  
 }
 
 #nav {

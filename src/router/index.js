@@ -30,6 +30,6 @@ const router = new VueRouter({
   routes
 });
 
-console.log('hello from index.js')
+console.log("hello from index.js");
 
 export default router;

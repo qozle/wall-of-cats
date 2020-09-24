@@ -16,15 +16,21 @@ const rulesURL = 'https://api.twitter.com/2/tweets/search/stream/rules'
 const streamURL = 'https://api.twitter.com/2/tweets/search/stream?media.fields=url,type,media_key&expansions=attachments.media_keys';
 
 
-// Edit rules as desired here below
+// Rules for how to filter the stream of tweets.
 const rules = [
   {
     'value': '(cat OR cats OR kitty OR kitten) has:images -is:quote -is:retweet -has:mentions'
   }
   ];
 
+//  That SSL tho
+const server = https.createServer({
+  cert: fs.readFileSync('/etc/letsencrypt/live/01014.org/fullchain.pem', 'utf8'),
+  key: fs.readFileSync('/etc/letsencrypt/live/01014.org/privkey.pem', 'utf8'),
+  ca: fs.readFileSync('/etc/letsencrypt/live/01014.org/chain.pem', 'utf8')
+}, app);
 
-// Function to get all rules
+// Function to pull whatever rules have already been posted.  
 async function getAllRules() {
   try {
     const response = await needle('get', rulesURL, {
@@ -46,7 +52,7 @@ async function getAllRules() {
 }
 
 
-// Function to delete all rules
+// Function to delete all current rules
 async function deleteAllRules(rules) {
   try {
 
@@ -74,15 +80,13 @@ async function deleteAllRules(rules) {
     console.log(e)
     process.exit(-1)
   }
-
 }
 
 
 // Function to set rules
 async function setRules() {
   try {
-
-    const data = {
+const data = {
       "add": rules
     }
     const response = await needle('post', rulesURL, data, {
@@ -105,7 +109,6 @@ async function setRules() {
 
 // Function to connect the stream
 function streamConnect() {
-  //Listen to the stream
   const options = {
     timeout: 20000,
     compressed: true
@@ -117,11 +120,18 @@ function streamConnect() {
     }
   }, options);
 
+  
   stream.on('data', data => {
     try {
       //      console.log(data.toString());
+      //  The twitter API sends three kinds of messages: 
+      //  1) Tweets / Tweet data (in accordance to the rules set),
+      //  2) Keep alive signals (in the form of "\r\n"),
+      //  3) Error messages.
+      //  Watch out for the keep alive signal
       if (data.toString() == '\r\n') {
         console.log("Hey bro, I just wanetd to tell you, we just got a keep-alive signal in the form of a carriage return: '\r\n")
+        // Watch for data that has media attached, insert it into the database
       } else if (JSON.parse(data).includes) {
         const json = JSON.parse(data);
         var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
@@ -130,12 +140,13 @@ function streamConnect() {
           if (err) throw err;
           console.log("Data inserted into database.  Bro.");
         });
-
+        // Watch out for error messages
       } else if (JSON.parse(data).error) {
         console.log("Bro, we've got an error here, bro:")
         console.log(JSON.parse(data).error)
       }
     } catch (e) {
+      //  In case I missed anything, it's probably fine.
       // Keep alive signal received. Do nothing.
       console.log(e)
     }
@@ -145,12 +156,11 @@ function streamConnect() {
     }
     console.log(error)
   });
-
-  return stream;
+return stream;
 
 }
 
-//  Put it all into action, connect the API strea, start pushing data
+//  Put it all into action, connect the API stream, start pushing data
 //  into the mysql database
 (async () => {
   let currentRules;
@@ -159,7 +169,7 @@ function streamConnect() {
     // Gets the complete list of rules currently applied to the stream
     currentRules = await getAllRules();
 
-    // Delete all rules. Comment the line below if you want to keep your existing rules.
+    // Delete all rules so we don't have overlaps, in case. Comment the line below if you want to keep your existing rules.
     await deleteAllRules(currentRules);
 
     // Add rules to the stream. Comment the line below if you don't want to add new rules.
@@ -170,12 +180,12 @@ function streamConnect() {
     process.exit(-1);
   }
 
+  
   // Listen to the stream.
   // This reconnection logic will attempt to reconnect when a disconnection is detected.
   // To avoid rate limites, this logic implements exponential backoff, so the wait time
   // will increase if the client cannot reconnect to the stream.
-
-  const filteredStream = streamConnect()
+const filteredStream = streamConnect()
   let timeout = 0;
   filteredStream.on('timeout', () => {
     // Reconnect on error
@@ -190,7 +200,6 @@ function streamConnect() {
   filteredStream.on('header', () => {
     console.log('Bro, we connected to the twitter servers, bro.')
   })
-
 })();
 
 // Open a connection pool to the MYSQL db
@@ -204,8 +213,7 @@ var pool = mysql.createPool({
 
 //  Connect the root user to the database to watch for updates 
 const sqlWatcher = async () => {
-
-  const connection = mysql.createConnection({
+const connection = mysql.createConnection({
     host: 'localhost',
     user: 'root',
     password: '193267abC',
@@ -214,7 +222,7 @@ const sqlWatcher = async () => {
 
   const instance = new MySQLEvents(connection, {
     serverId: Math.floor(Math.random() * 1320984),
-    startAtEnd: true // to record only the new binary logs, if set to false or you didn'y provide it all the events will be console.logged after you start the app
+    startAtEnd: true // to record only the new binary logs, if set to false or you didn't provide it, all the events will be console.logged after you start the app
   });
 
   await instance.start()
@@ -222,18 +230,16 @@ const sqlWatcher = async () => {
 
   instance.addTrigger({
     name: 'monitor_inserts',
-    expression: 'twit.*', // listen to TEST database !!!
-    statement: MySQLEvents.STATEMENTS.INSERT, // you can choose only insert for example MySQLEvents.STATEMENTS.INSERT, but here we are choosing everything
+    expression: 'twit.*', 
+    statement: MySQLEvents.STATEMENTS.INSERT,
     onEvent: e => {
       if (socketServer.clients.size) {
-
-        socketServer.clients.forEach(function (client) {
+socketServer.clients.forEach(function (client) {
           sendOnDbUpdate(e, client);
         });
       }
     }
-
-  });
+});
   instance.on(MySQLEvents.EVENTS.CONNECTION_ERROR, console.error);
   instance.on(MySQLEvents.EVENTS.ZONGJI_ERROR, console.error);
 };
@@ -257,6 +263,10 @@ const sendOnDbUpdate = (e, socketClient) => {
   console.log('Bro, the SQL watcher noticed a change in the database and pushed it to the client dude.');
 }
 
+//  Every 3 minutes, delete everything older than 3 minutes.
+//  This is to make sure the database doesn't get cluttered
+//  and also so that the initial grid will be different images
+//  if the user refreshes or revisits
 const clearDbTable = function () {
   let clearDbSQL = 'DELETE FROM cats WHERE date < (DATE_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 MINUTE))';
   pool.query(clearDbSQL, function (err) {
@@ -267,35 +277,14 @@ const clearDbTable = function () {
 
 const clearDbTableInterval = setInterval(clearDbTable, 180000);
 
-const server = https.createServer({
-  cert: fs.readFileSync('/etc/letsencrypt/live/01014.org/fullchain.pem', 'utf8'),
-  key: fs.readFileSync('/etc/letsencrypt/live/01014.org/privkey.pem', 'utf8'),
-  ca: fs.readFileSync('/etc/letsencrypt/live/01014.org/chain.pem', 'utf8')
-}, app);
-
-//app.use(history({
-//  disableDotRule: true,
-//  verbose: true,
-//  logger: console.log.bind(console),
-//  index: '/wall-of-cats/index.html'
-//
-//}));
 //  Serve all necessary static files from subdirectories- this could refined / specified to enhance security
 app.use('/wall-of-cats/', express.static(path.join(__dirname, '../wall-of-cats/index.html')));
 
-//app.get('/wall-of-cats/index.html', (req, res) =>{
-//  console.log(req);
-//  res.send("Hey, you wanted the index.html file right?")
-//})
-
 app.use(cors());
 
-
-
-
-
-
-//  Port 3000, so that apache2 can redirect trafic to this server instead of serving content from the apache server.
+//  Port 3000, so that apache2 can redirect traffic to this server instead of serving content from the apache server.
+//  If you want to set up this server on your local dev env, 
+//  prolly should put localhost here
 server.listen(3000, '01014.org', () => {
   console.log('server running')
 });
@@ -305,8 +294,6 @@ const socketServer = new WebSocket.Server({
   server: server,
   rejectUnauthorized: false
 });
-
-
 
 //console.log(socketServer.clients);
 socketServer.on('connection', (socketClient) => {
@@ -326,8 +313,7 @@ socketServer.on('connection', (socketClient) => {
       type: 'initialData',
       data: initialData
     }));
-
-  });
+});
 
   console.log('connected');
   console.log('client Set length: ', socketServer.clients.size);

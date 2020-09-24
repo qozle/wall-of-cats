@@ -18,6 +18,9 @@ You'll also need to setup a MYSQL database.  Table structure is:
 | date      | datetime     | YES  |     | CURRENT_TIMESTAMP | DEFAULT_GENERATED |
 +-----------+--------------+------+-----+-------------------+-------------------+
 ```
+
+You'll also need a Twitter Dev account, and the resulting bearer token that comes with it, for authenticating the stream.  Check out dev.twitter.com for more details on how to do this. 
+
 ### Compiles and hot-reloads for development
 ```
 npm run serve

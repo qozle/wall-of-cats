@@ -8,7 +8,6 @@
 // @ is an alias to /src
 import TwittDisplay from "@/components/TwittDisplay.vue";
 
-
 export default {
   name: "Home",
   components: {
@@ -16,4 +15,3 @@ export default {
   }
 };
 </script>
-
