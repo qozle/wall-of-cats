@@ -1,7 +1,7 @@
 .DS_Store
 node_modules
 /dist
-srv/.env
+/srv/.env
 
 /tests/e2e/videos/
 /tests/e2e/screenshots/
