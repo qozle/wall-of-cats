@@ -1,8 +1,11 @@
 import Vue from "vue";
 import VueRouter from "vue-router";
 import Home from "../views/Home.vue";
+import { BootstrapVue, IconsPlugin } from "bootstrap-vue";
 
 Vue.use(VueRouter);
+Vue.use(BootstrapVue);
+Vue.use(IconsPlugin);
 
 const routes = [
   {
@@ -26,5 +29,7 @@ const router = new VueRouter({
   base: process.env.BASE_URL,
   routes
 });
+
+console.log('hello from index.js')
 
 export default router;

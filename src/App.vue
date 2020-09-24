@@ -4,17 +4,36 @@
       <router-link to="/">Home</router-link> |
       <router-link to="/about">About</router-link>
     </div>
+    <Title />
     <router-view />
   </div>
 </template>
 
+<script>
+// @ is an alias to /src
+
+  import Title from "@/components/Title.vue"
+
+export default {
+  name: "app",
+  components: {
+    Title
+  }
+};
+</script>
 <style>
+  html {
+    background-color: black;
+  }
+  
 #app {
   font-family: Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-align: center;
   color: #2c3e50;
+  background-color: black;
+  
 }
 
 #nav {
