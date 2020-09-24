@@ -1,4 +1,4 @@
-# twit
+# Wall of Cats
 
 You can visit the live version at https://01014.org/wall-of-cats
 
