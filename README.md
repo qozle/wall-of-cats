@@ -1,5 +1,7 @@
 # twit
 
+You can visit the live version at https://01014.org/wall-of-cats
+
 ## Project setup
 ```
 npm install
