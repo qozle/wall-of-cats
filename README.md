@@ -5,7 +5,7 @@
 npm install
 ```
 You'll also need to setup a MYSQL database.  Table structure is:
-
+```
 +-----------+--------------+------+-----+-------------------+-------------------+
 | Field     | Type         | Null | Key | Default           | Extra             |
 +-----------+--------------+------+-----+-------------------+-------------------+
@@ -15,7 +15,7 @@ You'll also need to setup a MYSQL database.  Table structure is:
 | id        | int          | NO   | PRI | NULL              | auto_increment    |
 | date      | datetime     | YES  |     | CURRENT_TIMESTAMP | DEFAULT_GENERATED |
 +-----------+--------------+------+-----+-------------------+-------------------+
-
+```
 ### Compiles and hot-reloads for development
 ```
 npm run serve
