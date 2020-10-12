@@ -38,7 +38,7 @@ export default {
     this.ws.onopen = () => {
       console.log("Now connected");
     };
-
+    
     this.ws.onmessage = event => {
       var data = JSON.parse(event.data);
       switch (data.type) {

@@ -8,12 +8,16 @@ const WebSocket = require('ws');
 const path = require('path');
 const needle = require('needle');
 require('dotenv').config();
+const nsfwjs = require('nsfwjs');
+const tf = require('@tensorflow/tfjs-node')
+const jpeg = require('jpeg-js');
 const mysql = require('mysql');
 const MySQLEvents = require('@rodrigogs/mysql-events');
 // Hope you've got a bearer token, bro
 const token = process.env.BEARER_TOKEN;
 const rulesURL = 'https://api.twitter.com/2/tweets/search/stream/rules'
 const streamURL = 'https://api.twitter.com/2/tweets/search/stream?media.fields=url,type,media_key&expansions=attachments.media_keys';
+
 
 
 // Rules for how to filter the stream of tweets.
@@ -47,7 +51,8 @@ async function getAllRules() {
     return (response.body);
   } catch (e) {
     console.log(e);
-    process.exit(-1);
+    console.log('your error is coming from one of these requests at: ' + new Date())
+//    process.exit(-1);
   }
 }
 
@@ -70,6 +75,8 @@ async function deleteAllRules(rules) {
         "content-type": "application/json",
         "authorization": `Bearer ${token}`
       }
+    }, function () {
+      console.log('finished deleteAllRules')
     })
     if (response.statusCode !== 200) {
       throw new Error(response.body);
@@ -78,7 +85,8 @@ async function deleteAllRules(rules) {
     return (response.body);
   } catch (e) {
     console.log(e)
-    process.exit(-1)
+    console.log('your error is coming from one of these requests at: ' + new Date())
+//    process.exit(-1)
   }
 }
 
@@ -86,7 +94,7 @@ async function deleteAllRules(rules) {
 // Function to set rules
 async function setRules() {
   try {
-const data = {
+    const data = {
       "add": rules
     }
     const response = await needle('post', rulesURL, data, {
@@ -94,6 +102,8 @@ const data = {
         "content-type": "application/json",
         "authorization": `Bearer ${token}`
       }
+    }, function () {
+      console.log('finished setRules()')
     })
     if (response.statusCode !== 201) {
       throw new Error(response.body);
@@ -102,13 +112,30 @@ const data = {
     return (response.body);
   } catch (e) {
     console.log(e)
-    process.exit(-1)
+    console.log('your error is coming from one of these requests at: ' + new Date())
+//    process.exit(-1)
   }
 }
 
 
+// Decoded image in UInt8 Byte array
+const convert = async (img) => {
+  const image = await jpeg.decode(img, true)
+
+  const numChannels = 3
+  const numPixels = image.width * image.height
+  const values = new Int32Array(numPixels * numChannels)
+
+  for (let i = 0; i < numPixels; i++)
+    for (let c = 0; c < numChannels; ++c)
+      values[i * numChannels + c] = image.data[i * 4 + c]
+
+  return tf.tensor3d(values, [image.height, image.width, numChannels], 'int32')
+}
+
+
 // Function to connect the stream
-function streamConnect() {
+function streamConnect(model) {
   const options = {
     timeout: 20000,
     compressed: true
@@ -120,8 +147,9 @@ function streamConnect() {
     }
   }, options);
 
-  
-  stream.on('data', data => {
+
+
+  stream.on('data', async data => {
     try {
       //      console.log(data.toString());
       //  The twitter API sends three kinds of messages: 
@@ -130,16 +158,30 @@ function streamConnect() {
       //  3) Error messages.
       //  Watch out for the keep alive signal
       if (data.toString() == '\r\n') {
-        console.log("Hey bro, I just wanetd to tell you, we just got a keep-alive signal in the form of a carriage return: '\r\n")
+        console.log("Hey bro, I just wanetd to tell you, we just got a keep-alive signal in the form of a carriage return")
         // Watch for data that has media attached, insert it into the database
       } else if (JSON.parse(data).includes) {
         const json = JSON.parse(data);
-        var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
-        var valuesUpdate = [[json.includes.media[0].media_key], [json.includes.media[0].type], [json.includes.media[0].url]];
-        pool.query(sqlUpdate, valuesUpdate, function (err, result) {
-          if (err) throw err;
-          console.log("Data inserted into database.  Bro.");
-        });
+        //  link to image
+        needle('get', json.includes.media[0].url).then(async resp => {
+          const image = await convert(resp.body)
+          const predictions = await model.classify(image);
+          image.dispose();
+          
+          //  Check the image with the NSFW AI
+          if (predictions[0].className != "Hentai" && predictions[0].className != "Porn" && predictions[0].className != "Sexy") {
+            var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
+            var valuesUpdate = [[json.includes.media[0].media_key], [json.includes.media[0].type], [json.includes.media[0].url]];
+            pool.query(sqlUpdate, valuesUpdate, function (err, result) {
+              if (err) throw err;
+              console.log("Data inserted into database.  Bro.");
+              console.log(predictions[0].className);
+            });
+          }
+        }).catch(err =>{
+          console.log(err);
+          console.log(json.includes.media[0].url)
+        })
         // Watch out for error messages
       } else if (JSON.parse(data).error) {
         console.log("Bro, we've got an error here, bro:")
@@ -155,8 +197,9 @@ function streamConnect() {
       stream.emit('timeout');
     }
     console.log(error)
-  });
-return stream;
+  })
+
+  return stream;
 
 }
 
@@ -177,29 +220,37 @@ return stream;
 
   } catch (e) {
     console.error(e);
-    process.exit(-1);
+//    process.exit(-1);
   }
 
-  
+
   // Listen to the stream.
   // This reconnection logic will attempt to reconnect when a disconnection is detected.
   // To avoid rate limites, this logic implements exponential backoff, so the wait time
   // will increase if the client cannot reconnect to the stream.
-const filteredStream = streamConnect()
-  let timeout = 0;
-  filteredStream.on('timeout', () => {
-    // Reconnect on error
-    console.warn('A connection error occurred. Reconnecting…');
-    console.log('hey, we timed out from the Twitter servers, bro');
-    setTimeout(() => {
-      timeout++;
+
+
+  nsfwjs.load().then(function (model) {
+    const filteredStream = streamConnect(model)
+    let timeout = 0;
+    filteredStream.on('timeout', () => {
+      // Reconnect on error
+      console.warn('A connection error occurred. Reconnecting…');
+      console.log('hey, we timed out from the Twitter servers, bro');
+      setTimeout(() => {
+        timeout++;
+        streamConnect(token);
+      }, 2 ** timeout);
       streamConnect(token);
-    }, 2 ** timeout);
-    streamConnect(token);
+    })
+    filteredStream.on('header', () => {
+      console.log('Bro, we connected to the twitter servers, bro.')
+    })
+  }).catch(e => {
+    console.log('This error came from nsfw.js \r\n')
+    console.log(e)
   })
-  filteredStream.on('header', () => {
-    console.log('Bro, we connected to the twitter servers, bro.')
-  })
+
 })();
 
 // Open a connection pool to the MYSQL db
@@ -213,7 +264,7 @@ var pool = mysql.createPool({
 
 //  Connect the root user to the database to watch for updates 
 const sqlWatcher = async () => {
-const connection = mysql.createConnection({
+  const connection = mysql.createConnection({
     host: 'localhost',
     user: 'root',
     password: '193267abC',
@@ -230,16 +281,16 @@ const connection = mysql.createConnection({
 
   instance.addTrigger({
     name: 'monitor_inserts',
-    expression: 'twit.*', 
+    expression: 'twit.*',
     statement: MySQLEvents.STATEMENTS.INSERT,
     onEvent: e => {
       if (socketServer.clients.size) {
-socketServer.clients.forEach(function (client) {
+        socketServer.clients.forEach(function (client) {
           sendOnDbUpdate(e, client);
         });
       }
     }
-});
+  });
   instance.on(MySQLEvents.EVENTS.CONNECTION_ERROR, console.error);
   instance.on(MySQLEvents.EVENTS.ZONGJI_ERROR, console.error);
 };
@@ -282,7 +333,7 @@ app.use('/wall-of-cats/', express.static(path.join(__dirname, '../wall-of-cats/i
 
 app.use(cors());
 
-//  Port 3000, so that apache2 can redirect traffic to this server instead of serving content from the apache server.
+//  Port 3000, so that apache2 can redirect traffic to this server
 //  If you want to set up this server on your local dev env, 
 //  prolly should put localhost here
 server.listen(3000, '01014.org', () => {
@@ -313,7 +364,7 @@ socketServer.on('connection', (socketClient) => {
       type: 'initialData',
       data: initialData
     }));
-});
+  });
 
   console.log('connected');
   console.log('client Set length: ', socketServer.clients.size);
