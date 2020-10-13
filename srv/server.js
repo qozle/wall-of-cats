@@ -9,7 +9,8 @@ const path = require('path');
 const needle = require('needle');
 require('dotenv').config();
 const nsfwjs = require('nsfwjs');
-const tf = require('@tensorflow/tfjs-node')
+const tf = require('@tensorflow/tfjs-node');
+tf.enableProdMode();
 const jpeg = require('jpeg-js');
 const mysql = require('mysql');
 const MySQLEvents = require('@rodrigogs/mysql-events');
@@ -52,7 +53,7 @@ async function getAllRules() {
   } catch (e) {
     console.log(e);
     console.log('your error is coming from one of these requests at: ' + new Date())
-//    process.exit(-1);
+    //    process.exit(-1);
   }
 }
 
@@ -86,7 +87,7 @@ async function deleteAllRules(rules) {
   } catch (e) {
     console.log(e)
     console.log('your error is coming from one of these requests at: ' + new Date())
-//    process.exit(-1)
+    //    process.exit(-1)
   }
 }
 
@@ -113,7 +114,7 @@ async function setRules() {
   } catch (e) {
     console.log(e)
     console.log('your error is coming from one of these requests at: ' + new Date())
-//    process.exit(-1)
+    //    process.exit(-1)
   }
 }
 
@@ -164,10 +165,10 @@ function streamConnect(model) {
         const json = JSON.parse(data);
         //  link to image
         needle('get', json.includes.media[0].url).then(async resp => {
-          const image = await convert(resp.body)
+          const image = await tf.node.decodeImage(resp.body,3)
           const predictions = await model.classify(image);
           image.dispose();
-          
+
           //  Check the image with the NSFW AI
           if (predictions[0].className != "Hentai" && predictions[0].className != "Porn" && predictions[0].className != "Sexy") {
             var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
@@ -178,7 +179,7 @@ function streamConnect(model) {
               console.log(predictions[0].className);
             });
           }
-        }).catch(err =>{
+        }).catch(err => {
           console.log(err);
           console.log(json.includes.media[0].url)
         })
@@ -220,7 +221,7 @@ function streamConnect(model) {
 
   } catch (e) {
     console.error(e);
-//    process.exit(-1);
+    //    process.exit(-1);
   }
 
 
@@ -228,9 +229,7 @@ function streamConnect(model) {
   // This reconnection logic will attempt to reconnect when a disconnection is detected.
   // To avoid rate limites, this logic implements exponential backoff, so the wait time
   // will increase if the client cannot reconnect to the stream.
-
-
-  nsfwjs.load().then(function (model) {
+  nsfwjs.load("file://model/", {size: 299}).then(function (model) {
     const filteredStream = streamConnect(model)
     let timeout = 0;
     filteredStream.on('timeout', () => {
