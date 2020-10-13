@@ -11,7 +11,6 @@ require('dotenv').config();
 const nsfwjs = require('nsfwjs');
 const tf = require('@tensorflow/tfjs-node');
 tf.enableProdMode();
-const jpeg = require('jpeg-js');
 const mysql = require('mysql');
 const MySQLEvents = require('@rodrigogs/mysql-events');
 // Hope you've got a bearer token, bro
@@ -119,20 +118,7 @@ async function setRules() {
 }
 
 
-// Decoded image in UInt8 Byte array
-const convert = async (img) => {
-  const image = await jpeg.decode(img, true)
 
-  const numChannels = 3
-  const numPixels = image.width * image.height
-  const values = new Int32Array(numPixels * numChannels)
-
-  for (let i = 0; i < numPixels; i++)
-    for (let c = 0; c < numChannels; ++c)
-      values[i * numChannels + c] = image.data[i * 4 + c]
-
-  return tf.tensor3d(values, [image.height, image.width, numChannels], 'int32')
-}
 
 
 // Function to connect the stream
