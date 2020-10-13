@@ -19,7 +19,7 @@ You'll also need to setup a MYSQL database.  Table structure is:
 +-----------+--------------+------+-----+-------------------+-------------------+
 ```
 
-You'll also need a Twitter Dev account, and the resulting bearer token that comes with it, for authenticating the stream.  Check out dev.twitter.com for more details on how to do this. 
+You'll also need a Twitter Dev account, and the resulting bearer token that comes with it, for authenticating the stream.  Currently the server looks for a .env file with the line BEARER_TOKEN=<YourBearerTokenHere>.  Check out dev.twitter.com for more details on how to do this. 
 
 ### Compiles and hot-reloads for development
 ```
