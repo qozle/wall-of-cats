@@ -36,201 +36,177 @@ const server = https.createServer({
 
 // Function to pull whatever rules have already been posted.  
 async function getAllRules() {
-  try {
-    const response = await needle('get', rulesURL, {
-      headers: {
-        "authorization": `Bearer ${token}`
-      }
-    })
-
-    if (response.statusCode !== 200) {
-      throw new Error(response.body);
-      return null;
+  const response = await needle('get', rulesURL, {
+    headers: {
+      "authorization": `Bearer ${token}`
     }
+  }).catch(err => {
+    console.log(err)
+  })
 
-    return (response.body);
-  } catch (e) {
-    console.log(e);
-    console.log('your error is coming from one of these requests at: ' + new Date())
-    //    process.exit(-1);
+  if (response.statusCode !== 200) {
+    throw new Error(response.body);
+    return null;
   }
+  console.log("Finished getAllRules()")
+  return (response.body);
+
 }
 
 
 // Function to delete all current rules
 async function deleteAllRules(rules) {
-  try {
 
-    if (!Array.isArray(rules.data)) {
-      return null;
-    }
-    const ids = rules.data.map(rule => rule.id);
-    const data = {
-      "delete": {
-        "ids": ids
-      }
-    }
-    const response = await needle('post', rulesURL, data, {
-      headers: {
-        "content-type": "application/json",
-        "authorization": `Bearer ${token}`
-      }
-    }, function () {
-      console.log('finished deleteAllRules')
-    })
-    if (response.statusCode !== 200) {
-      throw new Error(response.body);
-      return null;
-    }
-    return (response.body);
-  } catch (e) {
-    console.log(e)
-    console.log('your error is coming from one of these requests at: ' + new Date())
-    //    process.exit(-1)
+  if (!Array.isArray(rules.data)) {
+    return null;
   }
+  const ids = rules.data.map(rule => rule.id);
+  const data = {
+    "delete": {
+      "ids": ids
+    }
+  }
+  const response = await needle('post', rulesURL, data, {
+    headers: {
+      "content-type": "application/json",
+      "authorization": `Bearer ${token}`
+    }
+  }).catch(err => {
+    console.log(err)
+  })
+  if (response.statusCode !== 200) {
+    throw new Error(response.body);
+    return null;
+  }
+  console.log("finished deleteAllRules")
+  return (response.body);
+
 }
 
 
 // Function to set rules
 async function setRules() {
-  try {
-    const data = {
-      "add": rules
-    }
-    const response = await needle('post', rulesURL, data, {
-      headers: {
-        "content-type": "application/json",
-        "authorization": `Bearer ${token}`
-      }
-    }, function () {
-      console.log('finished setRules()')
-    })
-    if (response.statusCode !== 201) {
-      throw new Error(response.body);
-      return null;
-    }
-    return (response.body);
-  } catch (e) {
-    console.log(e)
-    console.log('your error is coming from one of these requests at: ' + new Date())
-    //    process.exit(-1)
+
+  const data = {
+    "add": rules
   }
+  const response = await needle('post', rulesURL, data, {
+    headers: {
+      "content-type": "application/json",
+      "authorization": `Bearer ${token}`
+    }
+  }).catch(err => {
+    console.log(err)
+  })
+  if (response.statusCode !== 201) {
+    throw new Error(response.body);
+    return null;
+  }
+  console.log("setRules()")
+  return (response.body);
+
 }
-
-
-
 
 
 // Function to connect the stream
 function streamConnect(model) {
-  const options = {
-    timeout: 20000,
-    compressed: true
-  }
 
   const stream = needle.get(streamURL, {
     headers: {
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
+      compressed: true
     }
-  }, options);
-
-
+  });
 
   stream.on('data', async data => {
-    try {
-      //      console.log(data.toString());
-      //  The twitter API sends three kinds of messages: 
-      //  1) Tweets / Tweet data (in accordance to the rules set),
-      //  2) Keep alive signals (in the form of "\r\n"),
-      //  3) Error messages.
-      //  Watch out for the keep alive signal
-      if (data.toString() == '\r\n') {
-        console.log("Hey bro, I just wanetd to tell you, we just got a keep-alive signal in the form of a carriage return")
-        // Watch for data that has media attached, insert it into the database
-      } else if (JSON.parse(data).includes) {
-        const json = JSON.parse(data);
-        //  link to image
-        needle('get', json.includes.media[0].url).then(async resp => {
-          const image = await tf.node.decodeImage(resp.body,3)
-          const predictions = await model.classify(image);
-          image.dispose();
+    //  The twitter API sends three kinds of messages: 
+    //  1) Tweets / Tweet data (in accordance to the rules set),
+    //  2) Keep alive signals (in the form of "\r\n"),
+    //  3) Error messages.
+    //  Watch out for the keep alive signal
+    if (data.toString() == '\r\n') {
+      console.log("Hey bro, I just wanetd to tell you, we just got a keep-alive signal")
+      // Watch for data that has media attached, insert it into the database
+    } else if (JSON.parse(data).includes) {
+      const json = JSON.parse(data);
+      //  link to image
+      needle('get', json.includes.media[0].url).then(async resp => {
+        const image = await tf.node.decodeImage(resp.body, 3)
+        const predictions = await model.classify(image);
+        image.dispose();
 
-          //  Check the image with the NSFW AI
-          if (predictions[0].className != "Hentai" && predictions[0].className != "Porn" && predictions[0].className != "Sexy") {
-            var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
-            var valuesUpdate = [[json.includes.media[0].media_key], [json.includes.media[0].type], [json.includes.media[0].url]];
-            pool.query(sqlUpdate, valuesUpdate, function (err, result) {
-              if (err) throw err;
-              console.log("Data inserted into database.  Bro.");
-              console.log(predictions[0].className);
-            });
-          }
-        }).catch(err => {
-          console.log(err);
-          console.log(json.includes.media[0].url)
-        })
-        // Watch out for error messages
-      } else if (JSON.parse(data).error) {
-        console.log("Bro, we've got an error here, bro:")
-        console.log(JSON.parse(data).error)
-      }
-    } catch (e) {
-      //  In case I missed anything, it's probably fine.
-      // Keep alive signal received. Do nothing.
-      console.log(e)
+        //  Check the image with the NSFW AI
+        if (predictions[0].className != "Hentai" && predictions[0].className != "Porn" && predictions[0].className != "Sexy") {
+          var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
+          var valuesUpdate = [[json.includes.media[0].media_key], [json.includes.media[0].type], [json.includes.media[0].url]];
+          pool.query(sqlUpdate, valuesUpdate, function (err, result) {
+            if (err) throw err;
+            console.log("Data inserted into database.  Bro.");
+            console.log(predictions[0].className);
+          });
+        }
+      }).catch(err => {
+        console.log(err);
+      })
+      // Watch out for error messages
+    } else if (JSON.parse(data).error) {
+      console.log("We've got an error from twitter, bro:")
+      console.log(JSON.parse(data).error)
     }
+
   }).on('error', error => {
     if (error.code === 'ETIMEDOUT') {
+      console.log("connection timed out")
       stream.emit('timeout');
     }
+    console.log("Hey, there was an error with the stream...")
     console.log(error)
   })
-
   return stream;
 
 }
 
-//  Put it all into action, connect the API stream, start pushing data
-//  into the mysql database
+//  Put it all into action
 (async () => {
   let currentRules;
+  // Gets the complete list of rules currently applied to the stream
+  currentRules = await getAllRules();
+  // Delete all rules so we don't have overlaps, in case. Comment the line below if you want to keep your existing rules.
+  await deleteAllRules(currentRules);
+  // Add rules to the stream. Comment the line below if you don't want to add new rules.
+  await setRules();
 
-  try {
-    // Gets the complete list of rules currently applied to the stream
-    currentRules = await getAllRules();
-
-    // Delete all rules so we don't have overlaps, in case. Comment the line below if you want to keep your existing rules.
-    await deleteAllRules(currentRules);
-
-    // Add rules to the stream. Comment the line below if you don't want to add new rules.
-    await setRules();
-
-  } catch (e) {
-    console.error(e);
-    //    process.exit(-1);
-  }
-
-
-  // Listen to the stream.
-  // This reconnection logic will attempt to reconnect when a disconnection is detected.
-  // To avoid rate limites, this logic implements exponential backoff, so the wait time
-  // will increase if the client cannot reconnect to the stream.
-  nsfwjs.load("file://model/", {size: 299}).then(function (model) {
+  //  Load the model once on init, then pass it to streamConnect
+  nsfwjs.load("file://model/", {
+    size: 299
+  }).then(function (model) {
     const filteredStream = streamConnect(model)
     let timeout = 0;
+
     filteredStream.on('timeout', () => {
       // Reconnect on error
       console.warn('A connection error occurred. Reconnecting…');
-      console.log('hey, we timed out from the Twitter servers, bro');
       setTimeout(() => {
         timeout++;
-        streamConnect(token);
+        streamConnect(model);
       }, 2 ** timeout);
-      streamConnect(token);
+      streamConnect(model);
     })
-    filteredStream.on('header', () => {
+    //  After the header has been process, just before data is to
+    //  be consumed.  I.E., got a "valid" response.
+    filteredStream.on('header', (err) => {
       console.log('Bro, we connected to the twitter servers, bro.')
+      console.log(err);
     })
+
+    filteredStream.on("err", () => {
+      console.log("There was an error")
+    })
+
+    filteredStream.on("done", err => {
+      if (err) console.log("we had an error:\n\r" + err.message);
+    })
+
   }).catch(e => {
     console.log('This error came from nsfw.js \r\n')
     console.log(e)
@@ -293,8 +269,8 @@ const sendOnDbUpdate = (e, socketClient) => {
       data: e.affectedRows[0].after
     }));
 
-  } catch (e) {
-    console.log(e);
+  } catch (err) {
+    console.log(err);
   }
   console.log('Bro, the SQL watcher noticed a change in the database and pushed it to the client dude.');
 }
