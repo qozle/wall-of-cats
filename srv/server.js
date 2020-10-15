@@ -34,6 +34,29 @@ const server = https.createServer({
   ca: fs.readFileSync('/etc/letsencrypt/live/01014.org/chain.pem', 'utf8')
 }, app);
 
+//  Simple sleep / delay function for reconnection logic
+const sleep = async (delay) => {
+  return new Promise((resolve) => setTimeout(() => resolve(true), delay));
+};
+
+let timeout = 0;
+//  Reconnection logic (to twitter server) 
+const reconnect = async (stream, model) => {
+  //  console.log(stream)
+  timeout++;
+  try {
+    await stream.request.abort();
+    console.log("Stream aborted")
+    console.log("Waiting " + 4 ** timeout + " seconds to reconnect...")
+    await sleep(4 ** timeout * 1000);
+    console.log("Done waiting, trying to reconnect")
+    streamConnect(model);
+  } catch (e) {
+    console.log(e)
+  }
+};
+
+
 // Function to pull whatever rules have already been posted.  
 async function getAllRules() {
   const response = await needle('get', rulesURL, {
@@ -48,9 +71,8 @@ async function getAllRules() {
     throw new Error(response.body);
     return null;
   }
-  console.log("Finished getAllRules()")
+  console.log("Got all current rules for this filtered stream")
   return (response.body);
-
 }
 
 
@@ -78,7 +100,7 @@ async function deleteAllRules(rules) {
     throw new Error(response.body);
     return null;
   }
-  console.log("finished deleteAllRules")
+  console.log("Cleared all rules")
   return (response.body);
 
 }
@@ -102,7 +124,7 @@ async function setRules() {
     throw new Error(response.body);
     return null;
   }
-  console.log("setRules()")
+  console.log("Set all rules for the filtered stream")
   return (response.body);
 
 }
@@ -124,48 +146,57 @@ function streamConnect(model) {
     //  2) Keep alive signals (in the form of "\r\n"),
     //  3) Error messages.
     //  Watch out for the keep alive signal
-    if (data.toString() == '\r\n') {
-      console.log("Hey bro, I just wanetd to tell you, we just got a keep-alive signal")
-      // Watch for data that has media attached, insert it into the database
-    } else if (JSON.parse(data).includes) {
-      const json = JSON.parse(data);
-      //  link to image
-      needle('get', json.includes.media[0].url).then(async resp => {
-        const image = await tf.node.decodeImage(resp.body, 3)
-        const predictions = await model.classify(image);
-        image.dispose();
+    try {
 
-        //  Check the image with the NSFW AI
-        if (predictions[0].className != "Hentai" && predictions[0].className != "Porn" && predictions[0].className != "Sexy") {
-          var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
-          var valuesUpdate = [[json.includes.media[0].media_key], [json.includes.media[0].type], [json.includes.media[0].url]];
-          pool.query(sqlUpdate, valuesUpdate, function (err, result) {
-            if (err) throw err;
-            console.log("Data inserted into database.  Bro.");
-            console.log(predictions[0].className);
-          });
-        }
-      }).catch(err => {
-        console.log(err);
-      })
-      // Watch out for error messages
-    } else if (JSON.parse(data).error) {
-      console.log("We've got an error from twitter, bro:")
-      console.log(JSON.parse(data).error)
-    }
 
-  }).on('error', error => {
-    if (error.code === 'ETIMEDOUT') {
-      console.log("connection timed out")
-      stream.emit('timeout');
+      if (data.toString() == '\r\n') {
+        console.log("\nHey bro, I just wanetd to tell you, we just got a keep-alive signal\n" + new Date + "\n")
+        // Watch for data that has media attached, insert it into the database
+      } else if (data.toString() == '' || data == null) {
+        console.log("Looks like we got something we can't parse, oh well")
+      } else if (data.connection_issue) {
+        console.log("There was a connection issue sent from twitter:\n")
+        console.log(data.toString());
+        reconnect(filteredStream, model)
+      } else if (JSON.parse(data).includes) {
+        var json = JSON.parse(data)
+        needle('get', json.includes.media[0].url).then(async resp => {
+          const image = await tf.node.decodeImage(resp.body, 3)
+          const predictions = await model.classify(image);
+          image.dispose();
+          //  Check the image with the NSFW AI
+          if (predictions[0].className != "Hentai" && predictions[0].className != "Porn" && predictions[0].className != "Sexy") {
+            var sqlUpdate = "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
+            var valuesUpdate = [[json.includes.media[0].media_key], [json.includes.media[0].type], [json.includes.media[0].url]];
+            pool.query(sqlUpdate, valuesUpdate, function (err, result) {
+              if (err) {
+                console.log("There was an error with the MYSQL connection: \n")
+                console.log(err)
+              }
+              console.log("Data inserted into database.  Bro.");
+              //            console.log(predictions[0].className);
+            });
+          }
+        }).catch(err => {
+          console.log("There was an error with the get request to the twitter server: \n");
+          console.log(err)
+        })
+        //  Watch out for error messages from twitter
+
+
+      }
+    } catch (err) {
+      console.log("hello from line 193")
+      console.log(err)
+      console.log(data)
+      console.log(data.toString())
+
     }
-    console.log("Hey, there was an error with the stream...")
-    console.log(error)
   })
   return stream;
 
 }
-
+let filteredStream;
 //  Put it all into action
 (async () => {
   let currentRules;
@@ -180,23 +211,24 @@ function streamConnect(model) {
   nsfwjs.load("file://model/", {
     size: 299
   }).then(function (model) {
-    const filteredStream = streamConnect(model)
+    filteredStream = streamConnect(model)
     let timeout = 0;
 
     filteredStream.on('timeout', () => {
       // Reconnect on error
       console.warn('A connection error occurred. Reconnecting…');
-      setTimeout(() => {
-        timeout++;
-        streamConnect(model);
-      }, 2 ** timeout);
-      streamConnect(model);
+      reconnect(filteredStream, model)
     })
     //  After the header has been process, just before data is to
     //  be consumed.  I.E., got a "valid" response.
-    filteredStream.on('header', (err) => {
-      console.log('Bro, we connected to the twitter servers, bro.')
-      console.log(err);
+    filteredStream.on('header', (code) => {
+      if (code == 200) {
+        console.log('Bro, we connected to the twitter servers, bro.')
+      }
+      if (code == 429) {
+        console.log("got code 429 as a response")
+        reconnect(filteredStream, model);
+      }
     })
 
     filteredStream.on("err", () => {
@@ -205,6 +237,7 @@ function streamConnect(model) {
 
     filteredStream.on("done", err => {
       if (err) console.log("we had an error:\n\r" + err.message);
+      console.log("filterStream is Done(???)")
     })
 
   }).catch(e => {
@@ -214,7 +247,7 @@ function streamConnect(model) {
 
 })();
 
-// Open a connection pool to the MYSQL db
+// Create a pool to draw connections from
 var pool = mysql.createPool({
   connectionLimit: 25,
   host: "localhost",
@@ -238,7 +271,7 @@ const sqlWatcher = async () => {
   });
 
   await instance.start()
-    .catch(err => console.error('something bad happened', err));
+    .catch(err => console.log('something bad happened: \n' + err));
 
   instance.addTrigger({
     name: 'monitor_inserts',
@@ -263,7 +296,6 @@ sqlWatcher()
 //  callback for when there's a DB update
 const sendOnDbUpdate = (e, socketClient) => {
   try {
-    //              console.log(JSON.stringify(e.affectedRows[0].after))
     socketClient.send(JSON.stringify({
       type: 'update',
       data: e.affectedRows[0].after
@@ -272,7 +304,7 @@ const sendOnDbUpdate = (e, socketClient) => {
   } catch (err) {
     console.log(err);
   }
-  console.log('Bro, the SQL watcher noticed a change in the database and pushed it to the client dude.');
+  console.log('SQL watcher noticed a change in the database...pushed to client.');
 }
 
 //  Every 3 minutes, delete everything older than 3 minutes.
@@ -283,7 +315,7 @@ const clearDbTable = function () {
   let clearDbSQL = 'DELETE FROM cats WHERE date < (DATE_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 MINUTE))';
   pool.query(clearDbSQL, function (err) {
     if (err) throw err;
-    console.log('Bro.  I cleaned out everything older than 3 minutes ago <3')
+    console.log('Everything older than 3 mins has been cleared from the DB\n')
   });
 }
 
@@ -314,7 +346,10 @@ socketServer.on('connection', (socketClient) => {
   var initialData = [];
   var sql = 'SELECT url FROM cats limit 0,9';
   pool.query(sql, function (err, result) {
-    if (err) throw err;
+    if (err) {
+      console.log("Error at socketServer.on 'connection': \n")
+      console.log(err)
+    };
     console.log("Initial data sent");
     result.forEach(function (value, index, array) {
       initialData.push(array[index].url);
