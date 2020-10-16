@@ -19,13 +19,15 @@ const rulesURL = 'https://api.twitter.com/2/tweets/search/stream/rules'
 const streamURL = 'https://api.twitter.com/2/tweets/search/stream?media.fields=url,type,media_key&expansions=attachments.media_keys';
 
 
-
 // Rules for how to filter the stream of tweets.
 const rules = [
   {
     'value': '(cat OR cats OR kitty OR kitten) has:images -is:quote -is:retweet -has:mentions'
   }
   ];
+
+var timeout = 0;
+var model;
 
 //  That SSL tho
 const server = https.createServer({
@@ -39,18 +41,18 @@ const sleep = async (delay) => {
   return new Promise((resolve) => setTimeout(() => resolve(true), delay));
 };
 
-let timeout = 0;
+
 //  Reconnection logic (to twitter server) 
-const reconnect = async (stream, model) => {
-  //  console.log(stream)
+const reconnect = async (stream) => {
   timeout++;
   try {
-    await stream.request.abort();
+    await stream.request.abort()
     console.log("Stream aborted")
-    console.log("Waiting " + 4 ** timeout + " seconds to reconnect...")
-    await sleep(4 ** timeout * 1000);
+    console.log("Waiting " + (2 ** timeout) + " seconds to reconnect...")
+    await sleep((2 ** timeout) * 1000)
     console.log("Done waiting, trying to reconnect")
-    streamConnect(model);
+    streamConnect();
+
   } catch (e) {
     console.log(e)
   }
@@ -71,14 +73,13 @@ async function getAllRules() {
     throw new Error(response.body);
     return null;
   }
-  console.log("Got all current rules for this filtered stream")
+  console.log("Got all current rules")
   return (response.body);
 }
 
 
 // Function to delete all current rules
 async function deleteAllRules(rules) {
-
   if (!Array.isArray(rules.data)) {
     return null;
   }
@@ -102,13 +103,11 @@ async function deleteAllRules(rules) {
   }
   console.log("Cleared all rules")
   return (response.body);
-
 }
 
 
 // Function to set rules
 async function setRules() {
-
   const data = {
     "add": rules
   }
@@ -131,8 +130,7 @@ async function setRules() {
 
 
 // Function to connect the stream
-function streamConnect(model) {
-
+function streamConnect() {
   const stream = needle.get(streamURL, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -148,19 +146,29 @@ function streamConnect(model) {
     //  Watch out for the keep alive signal
     try {
 
-
+      //  If it's a keep alive signal, just say so.
       if (data.toString() == '\r\n') {
         console.log("\nHey bro, I just wanetd to tell you, we just got a keep-alive signal\n" + new Date + "\n")
-        // Watch for data that has media attached, insert it into the database
+        //  If it's null or an empty string, just say so
       } else if (data.toString() == '' || data == null) {
         console.log("Looks like we got something we can't parse, oh well")
+        //  If there's a connection issue, reconnect
+        //  This only picks up connection issues, I think.  Should be
+        //  more broad than this.
       } else if (data.connection_issue) {
         console.log("There was a connection issue sent from twitter:\n")
         console.log(data.toString());
-        reconnect(filteredStream, model)
+        console.log(data);
+        reconnect(stream);
+        //  If there's media data, put it in the DB
       } else if (JSON.parse(data).includes) {
         var json = JSON.parse(data)
         needle('get', json.includes.media[0].url).then(async resp => {
+          //  This should probably be passed to a new thread or something
+          //  I read in the twitter dev documents that stuff shouldn't
+          //  be processed right as it received like this because
+          //  it could lead to an overload of tweets and a disconnect or 
+          //  error ???
           const image = await tf.node.decodeImage(resp.body, 3)
           const predictions = await model.classify(image);
           image.dispose();
@@ -174,78 +182,52 @@ function streamConnect(model) {
                 console.log(err)
               }
               console.log("Data inserted into database.  Bro.");
-              //            console.log(predictions[0].className);
             });
           }
         }).catch(err => {
           console.log("There was an error with the get request to the twitter server: \n");
           console.log(err)
         })
-        //  Watch out for error messages from twitter
-
-
       }
     } catch (err) {
-      console.log("hello from line 193")
+      console.log("hello from line 194")
       console.log(err)
       console.log(data)
       console.log(data.toString())
-
     }
   })
-  return stream;
 
-}
-let filteredStream;
-//  Put it all into action
-(async () => {
-  let currentRules;
-  // Gets the complete list of rules currently applied to the stream
-  currentRules = await getAllRules();
-  // Delete all rules so we don't have overlaps, in case. Comment the line below if you want to keep your existing rules.
-  await deleteAllRules(currentRules);
-  // Add rules to the stream. Comment the line below if you don't want to add new rules.
-  await setRules();
-
-  //  Load the model once on init, then pass it to streamConnect
-  nsfwjs.load("file://model/", {
-    size: 299
-  }).then(function (model) {
-    filteredStream = streamConnect(model)
-    let timeout = 0;
-
-    filteredStream.on('timeout', () => {
-      // Reconnect on error
-      console.warn('A connection error occurred. Reconnecting…');
-      reconnect(filteredStream, model)
-    })
-    //  After the header has been process, just before data is to
-    //  be consumed.  I.E., got a "valid" response.
-    filteredStream.on('header', (code) => {
-      if (code == 200) {
-        console.log('Bro, we connected to the twitter servers, bro.')
-      }
-      if (code == 429) {
-        console.log("got code 429 as a response")
-        reconnect(filteredStream, model);
-      }
-    })
-
-    filteredStream.on("err", () => {
-      console.log("There was an error")
-    })
-
-    filteredStream.on("done", err => {
-      if (err) console.log("we had an error:\n\r" + err.message);
-      console.log("filterStream is Done(???)")
-    })
-
-  }).catch(e => {
-    console.log('This error came from nsfw.js \r\n')
-    console.log(e)
+  stream.on('timeout', () => {
+    // Reconnect on error
+    console.warn('A connection error occurred. Reconnecting…');
+    reconnect(stream)
+  })
+  //  After the header has been process, just before data is to
+  //  be consumed.  I.E., got a "valid" response.
+  stream.on('header', (code) => {
+    if (code == 200) {
+      console.log('Connected to the twitter server.')
+      timeout = 0;
+    }
+    if (code == 429) {
+      console.log("Got code 429 as a response")
+      reconnect(stream);
+    }
   })
 
-})();
+  stream.on("err", (err) => {
+    console.log("There was an error:\n")
+    console.log(err)
+  })
+
+  stream.on("done", err => {
+    if (err) console.log("we had an error:\n\r" + err.message);
+    console.log("Stream closed for some reason, let's reconnect")
+    reconnect(stream)
+  })
+  return stream;
+}
+
 
 // Create a pool to draw connections from
 var pool = mysql.createPool({
@@ -289,9 +271,6 @@ const sqlWatcher = async () => {
   instance.on(MySQLEvents.EVENTS.ZONGJI_ERROR, console.error);
 };
 
-sqlWatcher()
-  .then(console.log('SQL Watcher started'))
-  .catch(console.error);
 
 //  callback for when there's a DB update
 const sendOnDbUpdate = (e, socketClient) => {
@@ -307,10 +286,7 @@ const sendOnDbUpdate = (e, socketClient) => {
   console.log('SQL watcher noticed a change in the database...pushed to client.');
 }
 
-//  Every 3 minutes, delete everything older than 3 minutes.
-//  This is to make sure the database doesn't get cluttered
-//  and also so that the initial grid will be different images
-//  if the user refreshes or revisits
+
 const clearDbTable = function () {
   let clearDbSQL = 'DELETE FROM cats WHERE date < (DATE_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 MINUTE))';
   pool.query(clearDbSQL, function (err) {
@@ -319,19 +295,6 @@ const clearDbTable = function () {
   });
 }
 
-const clearDbTableInterval = setInterval(clearDbTable, 180000);
-
-//  Serve all necessary static files from subdirectories- this could refined / specified to enhance security
-app.use('/wall-of-cats/', express.static(path.join(__dirname, '../wall-of-cats/index.html')));
-
-app.use(cors());
-
-//  Port 3000, so that apache2 can redirect traffic to this server
-//  If you want to set up this server on your local dev env, 
-//  prolly should put localhost here
-server.listen(3000, '01014.org', () => {
-  console.log('server running')
-});
 
 const socketServer = new WebSocket.Server({
   clientTracking: 1,
@@ -339,7 +302,7 @@ const socketServer = new WebSocket.Server({
   rejectUnauthorized: false
 });
 
-//console.log(socketServer.clients);
+
 socketServer.on('connection', (socketClient) => {
   //  console.log(socketServer.clients);
   //  Send the initial data over to populate the grid
@@ -361,14 +324,61 @@ socketServer.on('connection', (socketClient) => {
       data: initialData
     }));
   });
-
   console.log('connected');
   console.log('client Set length: ', socketServer.clients.size);
 
   //  When the client closes the connection
   socketClient.on('close', (socketClient) => {
-    //        instance.stop()
-    console.log('closed');
+    console.log('A client closed their connection');
     console.log('Number of clients: ', socketServer.clients.size);
   });
+});
+
+
+
+//  Put it all into action
+(async () => {
+  try {
+    let currentRules;
+    // Gets the complete list of rules currently applied to the stream
+    currentRules = await getAllRules();
+    // Delete all rules so we don't have overlaps, in case. Comment the line below if you want to keep your existing rules.
+    await deleteAllRules(currentRules);
+    // Add rules to the stream. Comment the line below if you don't want to add new rules.
+    await setRules();
+
+    //  Load the model once on init
+    nsfwjs.load("file://model/", {
+      size: 299
+    }).then(function (theModel) {
+      model = theModel
+    })
+    //  Load the SQL watcher on init
+    sqlWatcher().then(() => {
+        console.log("SQL Watcher started")
+      })
+      .catch(console.error);
+
+    //  Every 3 minutes, delete everything older than 3 minutes.
+    const clearDbTableInterval = setInterval(clearDbTable, 180000);
+
+    //  Open up the first connection
+    streamConnect();
+
+  } catch (err) {
+    console.log(err)
+  }
+})();
+
+
+//  Serve all necessary static files from subdirectories- this could refined / specified to enhance security
+app.use('/wall-of-cats/', express.static(path.join(__dirname, '../wall-of-cats/index.html')));
+
+app.use(cors());
+
+//  Port 3000, so that apache2 can redirect traffic to this server
+//  If you want to set up this server on your local dev env, 
+//  prolly should put localhost here.  TLS info at top.
+server.listen(3000, '01014.org', () => {
+  console.log('server running')
 });

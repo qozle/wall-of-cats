@@ -26,6 +26,7 @@
     font-size: 1.3em;
     padding-left: 15px;
     padding-right: 15px;
+    color: silver;
   }
 
   #about-list {
