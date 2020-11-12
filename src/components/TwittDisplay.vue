@@ -28,18 +28,23 @@ export default {
     return {
       likes: 0,
       images: [],
-      ws: ""
+      ws: "",
+      objectDetector: ''
     };
   },
   methods: {},
-  mounted: function() {
+  created: function() {
+    },
+  mounted: async function() {
     var self = this;
+    const ml5 = this.$ml5
+    this.objectDetector = await ml5.objectDetector('MobileNet')
     this.ws = new WebSocket("wss://01014.org:3000");
     this.ws.onopen = () => {
       console.log("Now connected");
     };
-    
-    this.ws.onmessage = event => {
+
+    this.ws.onmessage = async (event) => {
       var data = JSON.parse(event.data);
       switch (data.type) {
         case "update":
@@ -48,6 +53,10 @@ export default {
           var newIndex = Math.floor(Math.random() * 9);
           //            console.log(newIndex);
           //            console.log(self.images[newIndex]);
+
+        
+          // var results = await this.objectDetector.detect(self.images[5]);
+          // console.log(results);
           if (self.images[newIndex].aShow) {
             self.images[newIndex].bUrl = data.data.url;
             self.images[newIndex].aShow = false;
@@ -63,17 +72,17 @@ export default {
               bShow: false,
               aUrl: currentValue,
               bUrl: "",
-              id: "image" + String(index)
+              id: "image" + String(index),
             });
           });
-          console.table(self.images);
+          // console.table(self.images);
           break;
       }
     };
   },
   beforeDestroy: function() {
     this.ws.close();
-  }
+  },
 };
 </script>
 

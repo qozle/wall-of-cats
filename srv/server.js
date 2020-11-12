@@ -1,16 +1,15 @@
 const express = require("express");
-const history = require("connect-history-api-fallback");
 const app = express();
 const cors = require("cors");
 const https = require("https");
-const http = require("http");
 const fs = require("fs");
 const WebSocket = require("ws");
 const path = require("path");
 const needle = require("needle");
 require("dotenv").config();
-const nsfwjs = require("nsfwjs");
 const tf = require("@tensorflow/tfjs-node");
+const cocoSsd = require("@tensorflow-models/coco-ssd");
+const nsfwjs = require("nsfwjs");
 tf.enableProdMode();
 const mysql = require("mysql");
 const MySQLEvents = require("@rodrigogs/mysql-events");
@@ -22,9 +21,11 @@ const streamURL =
 
 //  Here, have some global variables
 let timeout = 0,
-  model,
+  nsfwModel,
+  catModel,
   tweetTimes = [],
-  tweetID = 0;
+  tweetID = 0,
+  lastData = Date.now();
 
 // Rules for how to filter the stream of tweets.
 const rules = [
@@ -55,7 +56,9 @@ const sleep = async (delay) => {
 const reconnect = async (stream) => {
   timeout++;
   try {
-    await stream.request.abort();
+    if (!stream.request.aborted) {
+      await stream.request.abort();
+    }
     console.log("Stream aborted");
     console.log("Waiting " + 2 ** timeout + " seconds to reconnect...");
     await sleep(2 ** timeout * 1000);
@@ -77,6 +80,7 @@ async function getAllRules() {
   });
 
   if (response.statusCode !== 200) {
+    console.log(response.body);
     throw new Error(response.body);
   }
   console.log("Got all current rules");
@@ -193,14 +197,23 @@ const sendOnDbUpdate = (e, socketClient) => {
   );
 };
 
-//  Function for clearing the DB table every 3m
-const clearDbTable = function() {
+//  Clear the database of everything older than 3m, check that data is still
+//  coming from the twitter API because sometimes it randomly stops but keeps
+//  the connection open?
+const checkup = function() {
   let clearDbSQL =
     "DELETE FROM cats WHERE date < (DATE_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 MINUTE))";
   pool.query(clearDbSQL, function(err) {
     if (err) throw err;
     console.log("Everything older than 3 mins has been cleared from the DB\n");
   });
+  //  If we haven't gotten any cat images in 3 minutes, the connection is being
+  //  weird, so let's just reconnect because that fixes everything right.
+  if (lastData.getTime() < Date.now() - 180000) {
+    console.log(`Hey we haven't gotten any images in like two minutes so
+          I'm just gonna reconnect`);
+    reconnect(stream);
+  }
 };
 
 //  Function for throttling the connection.  If there have been > 170 tweets in a 15m
@@ -217,16 +230,29 @@ const tweetFlow = function(stream) {
   });
   if (tweetTimes.length > 170) {
     console.log(
-      `Amount of tweets is ${tweetTimes.length}, waiting a minute and then reconnecting`
+      `Amount of tweets we got in the last 15m is ${tweetTimes.length}, waiting a minute and then reconnecting`
     );
     stream.request.abort();
+    console.log("stream aborted");
     setTimeout(reconnect.bind(null, stream), 60000);
     return true;
   } else {
-    console.log(`Amount of tweets is ${tweetTimes.length}, so we good`);
+    console.log(
+      `Amount of tweets we got in the last 15m is ${tweetTimes.length}, so we good`
+    );
     return false;
   }
 };
+
+//  Function to check the catModel results for cats
+function areThereCats(results) {
+  for (let i = 0; i < results.length; i++) {
+    if (results[i].class == "cat" && results[i].score > 0.75) {
+      console.log("we got a cat!");
+      return true;
+    }
+  }
+}
 
 // Function to connect the stream
 function streamConnect() {
@@ -238,6 +264,7 @@ function streamConnect() {
   });
 
   stream.on("data", async (data) => {
+    console.log("\ndata received from the twitter server:");
     //  The twitter API sends three kinds of messages:
     //  1) Tweets / Tweet data (in accordance to the rules set),
     //  2) Keep alive signals (in the form of "\r\n"),
@@ -247,13 +274,19 @@ function streamConnect() {
       //  If it's a keep alive signal, just say so.
       if (data.toString() == "\r\n") {
         console.log(
-          "\nHey bro, I just wanetd to tell you, we just got a keep-alive signal\n" +
-            new Date() +
-            "\n"
+          "I just wanetd to tell you, we just got a keep-alive signal\n"
         );
+
         //  If it's null or an empty string, just say so
       } else if (data.toString() == "" || data == null) {
-        console.log("Looks like we got something we can't parse, oh well");
+        console.log("Looks like we got something we can't parse, oh well:\n");
+        try {
+          console.log(data);
+          console.log(data.toString());
+          console.log(JSON.parse(data));
+        } catch (err) {
+          console.log(err);
+        }
         //  If there's a connection issue, reconnect
         //  This only picks up connection issues, I think.  Should be
         //  more broad than this.
@@ -264,18 +297,21 @@ function streamConnect() {
         reconnect(stream);
         //  If there's media data, put it in the DB
       } else if (JSON.parse(data).includes && !tweetFlow(stream)) {
+        lastData = new Date();
         let json = JSON.parse(data);
         needle("get", json.includes.media[0].url)
           .then(async (resp) => {
             //  This could be passed to a new thread ??
             const image = await tf.node.decodeImage(resp.body, 3);
-            const predictions = await model.classify(image);
+            const predictions = await nsfwModel.classify(image);
+            const catObjects = await catModel.detect(image);
             image.dispose();
-            //  Check the image with the NSFW AI
+            //  Check that the image isn't NSFW and has a cat in it
             if (
               predictions[0].className != "Hentai" &&
               predictions[0].className != "Porn" &&
-              predictions[0].className != "Sexy"
+              predictions[0].className != "Sexy" &&
+              areThereCats(catObjects)
             ) {
               var sqlUpdate =
                 "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
@@ -294,18 +330,18 @@ function streamConnect() {
                 console.log("Data inserted into database.");
               });
             } else {
-              console.log("Tweet is not safe for work")
+              console.log("Tweet is not safe for work or doesn't have a cat in it");
             }
           })
           .catch((err) => {
             console.log(
-              "There was an error with the get request to the twitter server: \n"
+              "The nuclear codes have been leaked!: \n"
             );
             console.log(err);
           });
       }
     } catch (err) {
-      console.log("hello from line 311");
+      console.log("I have a bad feeling about this...");
       console.log(err);
       console.log(data.toString());
     }
@@ -324,7 +360,7 @@ function streamConnect() {
       timeout = 0;
     }
     if (code == 429) {
-      console.log("Got code 429 as a response");
+      console.log("Twitter gave us the ol' 429");
       reconnect(stream);
     }
   });
@@ -334,11 +370,6 @@ function streamConnect() {
     console.log(err);
   });
 
-  // stream.on("done", (err) => {
-  //   if (err) console.log("we had an error:\n\r" + err.message);
-  //   console.log("Stream closed for some reason, let's reconnect");
-  //   reconnect(stream);
-  // });
   return stream;
 }
 
@@ -400,8 +431,12 @@ socketServer.on("connection", (socketClient) => {
         size: 299,
       })
       .then(function(theModel) {
-        model = theModel;
+        nsfwModel = theModel;
+        console.log("NSFW model loaded");
       });
+
+    catModel = await cocoSsd.load();
+
     //  Load the SQL watcher on init
     sqlWatcher()
       .then(() => {
@@ -410,7 +445,7 @@ socketServer.on("connection", (socketClient) => {
       .catch(console.error);
 
     //  Every 3 minutes, delete everything older than 3 minutes.
-    const clearDbTableInterval = setInterval(clearDbTable, 180000);
+    const checkupInterval = setInterval(checkup, 180000);
 
     //  Open up the first connection
     streamConnect();
