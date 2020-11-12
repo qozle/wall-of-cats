@@ -3,7 +3,7 @@
     <div class="row">
       <div class="col-6">
         <p class="cat-paragraph">
-          This is an SPA that interfaces with the Twitter API to pull posts in realtime that mention "cat" OR "cats" OR "kitty" OR "kitten" AND don't have mentions AND aren't retweets AND have images. These images are then checked with an NSFW image recognition AI model- you may (or may not) be surprised to know that there is a good amount of NSFW tweet content regarding the word "cat".
+          This is an SPA that interfaces with the Twitter API to pull posts in realtime that mention "cat" OR "cats" OR "kitty" OR "kitten" AND don't have mentions AND aren't retweets AND have images. These images are then checked with an NSFW image recognition AI model- you may (or may not) be surprised to know that there is a good amount of NSFW tweet content regarding the word "cat".  This project utilizes Vue-cli for it's frontend and node.js for it's backend server.  
           <br><br>
           For more info, you can find the code <a href="https://github.com/qozle/wall-of-cats">here on github</a>.
         </p>
