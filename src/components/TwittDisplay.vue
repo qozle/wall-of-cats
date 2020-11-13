@@ -28,17 +28,12 @@ export default {
     return {
       likes: 0,
       images: [],
-      ws: "",
-      objectDetector: ''
+      ws: ""
     };
   },
   methods: {},
-  created: function() {
-    },
-  mounted: async function() {
+  mounted: function() {
     var self = this;
-    const ml5 = this.$ml5
-    this.objectDetector = await ml5.objectDetector('MobileNet')
     this.ws = new WebSocket("wss://01014.org:3000");
     this.ws.onopen = () => {
       console.log("Now connected");
@@ -54,9 +49,6 @@ export default {
           //            console.log(newIndex);
           //            console.log(self.images[newIndex]);
 
-        
-          // var results = await this.objectDetector.detect(self.images[5]);
-          // console.log(results);
           if (self.images[newIndex].aShow) {
             self.images[newIndex].bUrl = data.data.url;
             self.images[newIndex].aShow = false;

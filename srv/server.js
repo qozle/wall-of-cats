@@ -25,7 +25,8 @@ let timeout = 0,
   catModel,
   tweetTimes = [],
   tweetID = 0,
-  lastData = Date.now();
+  lastData = Date.now(),
+  stream;
 
 // Rules for how to filter the stream of tweets.
 const rules = [
@@ -53,19 +54,27 @@ const sleep = async (delay) => {
 };
 
 //  Reconnection logic (to twitter server)
-const reconnect = async (stream) => {
-  timeout++;
-  try {
-    if (!stream.request.aborted) {
-      await stream.request.abort();
+const reconnect = async () => {
+  //  Check that the flow rate is good first before connecting so that the
+  //  connection limit isn't surpassed in the process of trying to maintain the
+  //  flow rate.
+  if (!tweetOverflow()) {
+    timeout++;
+    try {
+      if (stream.request.aborted == false) {
+        await stream.request.abort();
+        console.log("Stream aborted");
+      }
+      console.log("Waiting " + 2 ** timeout + " seconds to reconnect...");
+      await sleep(2 ** timeout * 1000);
+      console.log("Done waiting, trying to reconnect");
+      streamConnect();
+    } catch (e) {
+      console.log(e);
     }
-    console.log("Stream aborted");
-    console.log("Waiting " + 2 ** timeout + " seconds to reconnect...");
-    await sleep(2 ** timeout * 1000);
-    console.log("Done waiting, trying to reconnect");
-    streamConnect();
-  } catch (e) {
-    console.log(e);
+  } else {
+    console.log("Flow rate still overloaded, waiting another 10 seconds");
+    setTimeout(reconnect, 10000);
   }
 };
 
@@ -212,34 +221,24 @@ const checkup = function() {
   if (lastData.getTime() < Date.now() - 180000) {
     console.log(`Hey we haven't gotten any images in like two minutes so
           I'm just gonna reconnect`);
-    reconnect(stream);
+    reconnect();
   }
 };
 
 //  Function for throttling the connection.  If there have been > 170 tweets in a 15m
 //  period, then it kills the connection to the twitter API and reconnects after a minute.
-const tweetFlow = function(stream) {
+const tweetOverflow = function() {
   let amntOfTweets = 0;
   let now = new Date().getTime();
-  tweetTimes.push({ id: tweetID + 1, time: new Date() });
   tweetID++;
   tweetTimes.forEach((tweet, i) => {
-    if (tweet.time.getTime() < now - 900000) {
+    if (tweet.time.getTime() < now - 60000) {
       tweetTimes.splice(i, 1);
     }
   });
-  if (tweetTimes.length > 170) {
-    console.log(
-      `Amount of tweets we got in the last 15m is ${tweetTimes.length}, waiting a minute and then reconnecting`
-    );
-    stream.request.abort();
-    console.log("stream aborted");
-    setTimeout(reconnect.bind(null, stream), 60000);
+  if (tweetTimes.length >= 11) {
     return true;
   } else {
-    console.log(
-      `Amount of tweets we got in the last 15m is ${tweetTimes.length}, so we good`
-    );
     return false;
   }
 };
@@ -256,7 +255,7 @@ function areThereCats(results) {
 
 // Function to connect the stream
 function streamConnect() {
-  const stream = needle.get(streamURL, {
+  stream = needle.get(streamURL, {
     headers: {
       Authorization: `Bearer ${token}`,
       compressed: true,
@@ -279,14 +278,8 @@ function streamConnect() {
 
         //  If it's null or an empty string, just say so
       } else if (data.toString() == "" || data == null) {
-        console.log("Looks like we got something we can't parse, oh well:\n");
-        try {
-          console.log(data);
-          console.log(data.toString());
-          console.log(JSON.parse(data));
-        } catch (err) {
-          console.log(err);
-        }
+        console.log("Got '' or null ???\n");
+
         //  If there's a connection issue, reconnect
         //  This only picks up connection issues, I think.  Should be
         //  more broad than this.
@@ -294,11 +287,17 @@ function streamConnect() {
         console.log("There was a connection issue sent from twitter:\n");
         console.log(data.toString());
         console.log(data);
-        reconnect(stream);
+        reconnect();
+      } else if (JSON.parse(data).errors) {
+        console.log(JSON.parse(data));
+
         //  If there's media data, put it in the DB
-      } else if (JSON.parse(data).includes && !tweetFlow(stream)) {
+      } else if (socketServer.clients.size > 0 && JSON.parse(data).includes) {
         lastData = new Date();
         let json = JSON.parse(data);
+        tweetTimes.push({ id: tweetID + 1, time: new Date() });
+        console.log(`flow: ${tweetTimes.length}`);
+        tweetOverflow()
         needle("get", json.includes.media[0].url)
           .then(async (resp) => {
             //  This could be passed to a new thread ??
@@ -320,6 +319,7 @@ function streamConnect() {
                 [json.includes.media[0].type],
                 [json.includes.media[0].url],
               ];
+
               pool.query(sqlUpdate, valuesUpdate, (err, result) => {
                 if (err) {
                   console.log(
@@ -330,16 +330,24 @@ function streamConnect() {
                 console.log("Data inserted into database.");
               });
             } else {
-              console.log("Tweet is not safe for work or doesn't have a cat in it");
+              console.log(
+                "Tweet is not safe for work or doesn't have a cat in it"
+              );
             }
           })
           .catch((err) => {
-            console.log(
-              "The nuclear codes have been leaked!: \n"
-            );
+            console.log("The nuclear codes have been leaked!: \n");
             console.log(err);
           });
-      }
+      } 
+      // else if (tweetOverflow()) {
+      //   console.log(
+      //     `Amount of tweets we got in the last minute is ${tweetTimes.length}, waiting 10s and then reconnecting`
+      //   );
+      //   stream.request.abort();
+      //   console.log("stream aborted");
+      //   setTimeout(reconnect, 10000);
+      // }
     } catch (err) {
       console.log("I have a bad feeling about this...");
       console.log(err);
@@ -350,7 +358,7 @@ function streamConnect() {
   stream.on("timeout", () => {
     // Reconnect on error
     console.warn("A connection error occurred. Reconnecting…");
-    reconnect(stream);
+    reconnect();
   });
   //  After the header has been processed, just before data is to
   //  be consumed.  I.E., got a "valid" response.
@@ -361,7 +369,7 @@ function streamConnect() {
     }
     if (code == 429) {
       console.log("Twitter gave us the ol' 429");
-      reconnect(stream);
+      reconnect();
     }
   });
 
@@ -370,7 +378,7 @@ function streamConnect() {
     console.log(err);
   });
 
-  return stream;
+  // return stream;
 }
 
 //  Make a new socket connection
@@ -382,6 +390,11 @@ const socketServer = new WebSocket.Server({
 
 //  Socket events
 socketServer.on("connection", (socketClient) => {
+  //  Every 3 minutes, delete everything older than 3 minutes.
+  const checkupInterval = setInterval(checkup, 180000);
+
+  //  Open up the first connection
+  streamConnect();
   //  console.log(socketServer.clients);
   //  Send the initial data over to populate the grid
   var initialData = [];
@@ -411,6 +424,8 @@ socketServer.on("connection", (socketClient) => {
   socketClient.on("close", (socketClient) => {
     console.log("A client closed their connection");
     console.log("Number of clients: ", socketServer.clients.size);
+    stream.request.abort()
+    clearInterval(checkupInterval)
   });
 });
 
@@ -434,8 +449,13 @@ socketServer.on("connection", (socketClient) => {
         nsfwModel = theModel;
         console.log("NSFW model loaded");
       });
-
-    catModel = await cocoSsd.load();
+    try {
+      catModel = await cocoSsd.load();
+      console.log("cocoSSD model loaded");
+    } catch (err) {
+      console.log("The cocoSSD model didn't load =(...");
+      console.log(err);
+    }
 
     //  Load the SQL watcher on init
     sqlWatcher()
@@ -443,12 +463,6 @@ socketServer.on("connection", (socketClient) => {
         console.log("SQL Watcher started");
       })
       .catch(console.error);
-
-    //  Every 3 minutes, delete everything older than 3 minutes.
-    const checkupInterval = setInterval(checkup, 180000);
-
-    //  Open up the first connection
-    streamConnect();
   } catch (err) {
     console.log(err);
   }
