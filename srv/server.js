@@ -1,32 +1,25 @@
 const express = require("express");
 const app = express();
-const cors = require("cors");
 const https = require("https");
 const fs = require("fs");
 const WebSocket = require("ws");
-const path = require("path");
 const needle = require("needle");
 require("dotenv").config();
 const tf = require("@tensorflow/tfjs-node");
 const cocoSsd = require("@tensorflow-models/coco-ssd");
-const nsfwjs = require("nsfwjs");
 tf.enableProdMode();
+const nsfwjs = require("nsfwjs");
 const mysql = require("mysql");
 const MySQLEvents = require("@rodrigogs/mysql-events");
-// Hope you've got a bearer token, bro
-const token = process.env.BEARER_TOKEN;
-const rulesURL = "https://api.twitter.com/2/tweets/search/stream/rules";
-const streamURL =
-  "https://api.twitter.com/2/tweets/search/stream?media.fields=url,type,media_key&expansions=attachments.media_keys";
+
 
 //  Here, have some global variables
-let timeout = 0,
-  nsfwModel,
-  catModel,
-  tweetTimes = [],
-  tweetID = 0,
-  lastData = Date.now(),
-  stream;
+// Hope you've got a bearer token, bro
+const token = process.env.BEARER_TOKEN;
+const streamURL = process.env.STREAM_URL
+const rulesURL = process.env.RULES_URL
+const privKey = process.env.PRIV_KEY
+const chainKey = process.env.CHAIN_KEY
 
 // Rules for how to filter the stream of tweets.
 const rules = [
@@ -35,30 +28,39 @@ const rules = [
       "(cat OR cats OR kitty OR kitten) has:images -is:quote -is:retweet -has:mentions",
   },
 ];
+const key = fs.readFileSync(
+  privKey,
+  "utf8"
+);
+const ca = fs.readFileSync(chainKey, "utf8");
+let nsfwModel,
+  catModel,
+  stream,
+  lastData = Date.now(),
+  timeout = 0;
 
+// tweetID = 0
+
+//  HTTPS server
 const server = https.createServer(
   {
     cert: fs.readFileSync(
       "/etc/letsencrypt/live/01014.org/fullchain.pem",
       "utf8"
     ),
-    key: fs.readFileSync("/etc/letsencrypt/live/01014.org/privkey.pem", "utf8"),
-    ca: fs.readFileSync("/etc/letsencrypt/live/01014.org/chain.pem", "utf8"),
+    key: key,
+    ca: ca,
   },
   app
 );
 
-//  Simple sleep / delay function for reconnection logic
-const sleep = async (delay) => {
+ //  Simple sleep / delay function for reconnection logic
+ const sleep = async (delay) => {
   return new Promise((resolve) => setTimeout(() => resolve(true), delay));
 };
 
 //  Reconnection logic (to twitter server)
 const reconnect = async () => {
-  //  Check that the flow rate is good first before connecting so that the
-  //  connection limit isn't surpassed in the process of trying to maintain the
-  //  flow rate.
-  if (!tweetOverflow()) {
     timeout++;
     try {
       if (stream.request.aborted == false) {
@@ -72,14 +74,10 @@ const reconnect = async () => {
     } catch (e) {
       console.log(e);
     }
-  } else {
-    console.log("Flow rate still overloaded, waiting another 10 seconds");
-    setTimeout(reconnect, 10000);
-  }
 };
 
 // Function to pull whatever rules have already been posted.
-async function getAllRules() {
+const getAllRules = async function() {
   const response = await needle("get", rulesURL, {
     headers: {
       authorization: `Bearer ${token}`,
@@ -94,10 +92,10 @@ async function getAllRules() {
   }
   console.log("Got all current rules");
   return response.body;
-}
+};
 
 // Function to delete all current rules
-async function deleteAllRules(rules) {
+const deleteAllRules = async function(rules) {
   if (!Array.isArray(rules.data)) {
     return null;
   }
@@ -121,10 +119,10 @@ async function deleteAllRules(rules) {
   }
   console.log("Cleared all rules");
   return response.body;
-}
+};
 
 // Function to set rules
-async function setRules() {
+const setRules = async function() {
   const data = {
     add: rules,
   };
@@ -142,16 +140,7 @@ async function setRules() {
   }
   console.log("Set all rules for the filtered stream");
   return response.body;
-}
-
-// Create a pool to draw connections from
-var pool = mysql.createPool({
-  connectionLimit: 25,
-  host: "localhost",
-  user: "jeme",
-  password: "193267abC",
-  database: "twit", // secure this by putting it in .env???  or is that less secure...
-});
+};
 
 //  Setup SQL watcher
 const sqlWatcher = async () => {
@@ -214,7 +203,9 @@ const checkup = function() {
     "DELETE FROM cats WHERE date < (DATE_SUB(CURRENT_TIMESTAMP(), INTERVAL 3 MINUTE))";
   pool.query(clearDbSQL, function(err) {
     if (err) throw err;
-    console.log("Everything older than 3 mins has been cleared from the DB\n");
+    console.log(
+      "Everything older than 3 mins has been cleared from the DB\n"
+    );
   });
   //  If we haven't gotten any cat images in 3 minutes, the connection is being
   //  weird, so let's just reconnect because that fixes everything right.
@@ -227,34 +218,43 @@ const checkup = function() {
 
 //  Function for throttling the connection.  If there have been > 170 tweets in a 15m
 //  period, then it kills the connection to the twitter API and reconnects after a minute.
-const tweetOverflow = function() {
-  let amntOfTweets = 0;
-  let now = new Date().getTime();
-  tweetID++;
-  tweetTimes.forEach((tweet, i) => {
-    if (tweet.time.getTime() < now - 60000) {
-      tweetTimes.splice(i, 1);
-    }
-  });
-  if (tweetTimes.length >= 11) {
-    return true;
-  } else {
-    return false;
-  }
-};
+//   const tweetOverflow = function() {
+//     let amntOfTweets = 0;
+//     let now = new Date().getTime();
+//     tweetTimes.forEach((tweet, i) => {
+//       if (tweet.time.getTime() < now - 60000) {
+//         tweetTimes.splice(i, 1);
+//       }
+//     });
+//     if (tweetTimes.length >= 11) {
+//       return true;
+//     } else {
+//       return false;
+//     }
+//   };
 
 //  Function to check the catModel results for cats
-function areThereCats(results) {
+const areThereCats = function(results) {
   for (let i = 0; i < results.length; i++) {
     if (results[i].class == "cat" && results[i].score > 0.75) {
       console.log("we got a cat!");
       return true;
     }
   }
-}
+};
 
-// Function to connect the stream
-function streamConnect() {
+// Create a pool to draw connections from
+let pool = mysql.createPool({
+  connectionLimit: 25,
+  host: "localhost",
+  user: "jeme",
+  password: "193267abC",
+  database: "twit", // secure this by putting it in .env???  or is that less secure...
+});
+
+// Function to connect to the stream and parse data
+// This could probably be refactored and made a bit more neat
+const streamConnect = function() {
   stream = needle.get(streamURL, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -295,9 +295,10 @@ function streamConnect() {
       } else if (socketServer.clients.size > 0 && JSON.parse(data).includes) {
         lastData = new Date();
         let json = JSON.parse(data);
-        tweetTimes.push({ id: tweetID + 1, time: new Date() });
-        console.log(`flow: ${tweetTimes.length}`);
-        tweetOverflow()
+        // tweetID++;
+        // tweetTimes.push({ id: tweetID + 1, time: new Date() });
+        // console.log(`flow: ${tweetTimes.length}`);
+        // tweetOverflow();
         needle("get", json.includes.media[0].url)
           .then(async (resp) => {
             //  This could be passed to a new thread ??
@@ -339,7 +340,8 @@ function streamConnect() {
             console.log("The nuclear codes have been leaked!: \n");
             console.log(err);
           });
-      } 
+      }
+      //  This is some old throttling logic that is mostly unecessary
       // else if (tweetOverflow()) {
       //   console.log(
       //     `Amount of tweets we got in the last minute is ${tweetTimes.length}, waiting 10s and then reconnecting`
@@ -379,7 +381,7 @@ function streamConnect() {
   });
 
   // return stream;
-}
+};
 
 //  Make a new socket connection
 const socketServer = new WebSocket.Server({
@@ -390,12 +392,15 @@ const socketServer = new WebSocket.Server({
 
 //  Socket events
 socketServer.on("connection", (socketClient) => {
-  //  Every 3 minutes, delete everything older than 3 minutes.
-  const checkupInterval = setInterval(checkup, 180000);
-
-  //  Open up the first connection
-  streamConnect();
-  //  console.log(socketServer.clients);
+  let checkupInterval;
+  console.log("Client connected");
+  console.log("client Set length: ", socketServer.clients.size);
+  if (socketServer.clients.size == 1) {
+    //  Every 3 minutes, delete everything older than 3 minutes.
+    checkupInterval = setInterval(checkup, 180000);
+    //  Open up the first connection
+    streamConnect();
+  }
   //  Send the initial data over to populate the grid
   var initialData = [];
   var sql = "SELECT url FROM cats limit 0,9";
@@ -417,27 +422,29 @@ socketServer.on("connection", (socketClient) => {
       })
     );
   });
-  console.log("connected");
-  console.log("client Set length: ", socketServer.clients.size);
 
   //  When the client closes the connection
   socketClient.on("close", (socketClient) => {
     console.log("A client closed their connection");
     console.log("Number of clients: ", socketServer.clients.size);
-    stream.request.abort()
-    clearInterval(checkupInterval)
+    if (socketServer.clients.size == 0) {
+      stream.request.abort();
+      console.log("No users, stream aborted");
+      clearInterval(checkupInterval);
+      console.log("No users, checkup interval cleared");
+    }
   });
 });
 
-//  Put it all into action
-(async () => {
+//  Get, clear, set twitter filter rules, load AI models, startup the SQL watcher
+const main = async () => {
   try {
     let currentRules;
     // Gets the complete list of rules currently applied to the stream
     currentRules = await getAllRules();
-    // Delete all rules so we don't have overlaps, in case. Comment the line below if you want to keep your existing rules.
+    // Delete all rules so we don't have overlaps.
     await deleteAllRules(currentRules);
-    // Add rules to the stream. Comment the line below if you don't want to add new rules.
+    // Add rules to the stream.
     await setRules();
 
     //  Load the model once on init
@@ -450,6 +457,9 @@ socketServer.on("connection", (socketClient) => {
         console.log("NSFW model loaded");
       });
     try {
+      // const handler = tfn.io.fileSystem(cocoSSD)
+      // let url = "https://storage.googleapis.com/tfjs-models/savedmodel/mobilenet_v2_1.0_224/model.json"
+      // catModel = await tf.loadGraphModel(url)
       catModel = await cocoSsd.load();
       console.log("cocoSSD model loaded");
     } catch (err) {
@@ -466,14 +476,13 @@ socketServer.on("connection", (socketClient) => {
   } catch (err) {
     console.log(err);
   }
-})();
-
-// app.use(cors());
+};
 
 //  Port 3000, so that apache2 can redirect traffic to this server
 //  If you want to set up this server on your local dev env,
 //  prolly should put localhost here.  TLS info at top.
-
 server.listen(3000, "01014.org", () => {
   console.log("server running");
 });
+//  Start the show
+main();
