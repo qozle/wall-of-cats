@@ -29,7 +29,7 @@ const rules = [
 ];
 let nsfwModel,
   catModel,
-  stream,
+  stream = null,
   lastData = new Date(),
   timeout = 0;
 
