@@ -166,7 +166,7 @@ const checkup = function() {
   });
   //  If we haven't gotten any cat images in 3 minutes, the connection is being
   //  weird, so let's just reconnect because that fixes everything right.
-  if (lastData.getTime() < Date.now() - 180000) {
+  if (stream != null && lastData.getTime() < Date.now() - 180000) {
     console.log(`Connection to twitter servers stale, reconnecting`);
     reconnect();
   }
@@ -344,6 +344,7 @@ socketServer.on("connection", (socketClient) => {
     console.log("Number of clients: ", socketServer.clients.size);
     if (socketServer.clients.size == 0) {
       stream.request.abort();
+      stream = null;
       console.log("No users, stream aborted");
       clearInterval(checkupInterval);
       console.log("No users, checkup interval cleared");
