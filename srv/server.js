@@ -32,8 +32,8 @@ let nsfwModel,
   stream = null,
   lastData = new Date(),
   timeout = 0,
+  reconnecting = false,
   checkupInterval;
-
 
 //  HTTPS server
 const server = https.createServer({ cert: cert, key: key, ca: ca }, app);
@@ -129,13 +129,12 @@ const sqlWatcher = async () => {
       }
     }
   });
-  instance.on(MySQLEvents.EVENTS.CONNECTION_ERROR, (error)=>{
-    console.log(error)
-    console.log("SQL watcher conneciton died, reconnecting...")
-    sqlWatcher()
-    .then(()=>{
-      console.log("SQL watcher reestablished!")
-    })
+  instance.on(MySQLEvents.EVENTS.CONNECTION_ERROR, (error) => {
+    console.log(error);
+    console.log("SQL watcher conneciton died, reconnecting...");
+    sqlWatcher().then(() => {
+      console.log("SQL watcher reestablished!");
+    });
   });
   instance.on(MySQLEvents.EVENTS.ZONGJI_ERROR, console.error);
 };
@@ -176,21 +175,24 @@ const checkup = function() {
 
 //  Reconnection logic (to twitter server)
 const reconnect = async () => {
-  timeout++;
-  try {
-    if (stream.request.aborted == false) {
-      await stream.request.abort();
-      console.log("Stream aborted");
+  if (reconnecting == false) {
+    reconnecting = true;
+    timeout++;
+    try {
+      if (stream.request.aborted == false) {
+        await stream.request.abort();
+        console.log("Stream aborted");
+      }
+      console.log("Waiting " + 4 ** timeout + " seconds to reconnect...");
+      await sleep(4 ** timeout * 1000);
+      console.log("Done waiting, trying to reconnect");
+      stream = streamConnect();
+      reconnecting = false;
+    } catch (e) {
+      console.log(e);
     }
-    console.log("Waiting " + 4 ** timeout + " seconds to reconnect...");
-    await sleep(4 ** timeout * 1000);
-    console.log("Done waiting, trying to reconnect");
-    streamConnect();
-  } catch (e) {
-    console.log(e);
   }
 };
-
 
 //  Function to check the catModel results for cats
 const areThereCats = function(results) {
@@ -234,7 +236,6 @@ const streamConnect = function() {
         //  If there's an error sent from twitter
       } else if (data.connection_issue) {
         console.log("There was a connection issue sent from twitter:\n");
-        console.log(data.toString());
         console.log(data);
         reconnect();
         //  or maybe this one will work ???
@@ -303,6 +304,8 @@ const streamConnect = function() {
     console.log("There was an error:\n");
     console.log(err);
   });
+
+  return stream;
 };
 
 //  Make the socket server
@@ -318,7 +321,9 @@ socketServer.on("connection", (socketClient) => {
   console.log("client Set length: ", socketServer.clients.size);
   if (socketServer.clients.size == 1) {
     checkupInterval = setInterval(checkup, 180000);
-    streamConnect();
+    if(!reconnecting){
+      stream = streamConnect();
+    }
   }
   var initialData = [];
   var sql = "SELECT url FROM cats ORDER BY id DESC limit 0,9";
@@ -356,7 +361,7 @@ socketServer.on("connection", (socketClient) => {
 //  Preload, start the server
 (async () => {
   // Gets the complete list of rules currently applied to the stream
-  let p1 = getAllRules()
+  let p1 = getAllRules();
   let p2 = deleteAllRules(p1);
   let p3 = setRules();
   let p4 = nsfwjs
