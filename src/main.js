@@ -17,4 +17,3 @@ new Vue({
   render: h => h(App)
 }).$mount("#app");
 
-console.log("hello from main.js");

@@ -159,7 +159,7 @@ const sendOnDbUpdate = (e, socketClient) => {
 //  the connection open?
 const checkup = function() {
   let clearDbSQL =
-    "DELETE FROM cats WHERE id > (SELECT MAX(m.id) FROM (SELECT id FROM cats ORDER BY id LIMIT 100) m);";
+    "DELETE FROM cats WHERE date > (SELECT MAX(m.date) FROM (SELECT date FROM cats ORDER BY date DESC LIMIT 100) m);";
   pool.query(clearDbSQL, function(err) {
     if (err) throw err;
     console.log("Database tidied up\n");
@@ -355,19 +355,18 @@ socketServer.on("connection", (socketClient) => {
 //  Preload, start the server
 (async () => {
   // Gets the complete list of rules currently applied to the stream
-  let p1 = getAllRules().then(async (currentRules) => {
-    await deleteAllRules(currentRules);
-  });
-  let p2 = setRules();
-  let p3 = nsfwjs
+  let p1 = getAllRules()
+  let p2 = deleteAllRules(p1);
+  let p3 = setRules();
+  let p4 = nsfwjs
     .load("file://model/", { size: 299 })
     .then((theModel) => (nsfwModel = theModel));
-  let p4 = cocoSsd.load().then((felineModel) => (catModel = felineModel));
+  let p5 = cocoSsd.load().then((felineModel) => (catModel = felineModel));
 
   //  Load the SQL watcher on init
-  let p5 = sqlWatcher();
+  let p6 = sqlWatcher();
 
-  Promise.all([p1, p2, p3, p4, p5])
+  Promise.all([p1, p2, p3, p4, p5, p6])
     .then(() => {
       console.log("Rules set, models loaded");
       server.listen(3000, "01014.org", () => {
