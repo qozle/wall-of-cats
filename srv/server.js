@@ -31,7 +31,9 @@ let nsfwModel,
   catModel,
   stream = null,
   lastData = new Date(),
-  timeout = 0;
+  timeout = 0,
+  checkupInterval;
+
 
 //  HTTPS server
 const server = https.createServer({ cert: cert, key: key, ca: ca }, app);
@@ -159,7 +161,7 @@ const sendOnDbUpdate = (e, socketClient) => {
 //  the connection open?
 const checkup = function() {
   let clearDbSQL =
-    "DELETE FROM cats WHERE date > (SELECT MAX(m.date) FROM (SELECT date FROM cats ORDER BY date DESC LIMIT 100) m);";
+    "DELETE FROM cats WHERE date > (SELECT MAX(m.date) FROM (SELECT date FROM cats ORDER BY date LIMIT 100) m);";
   pool.query(clearDbSQL, function(err) {
     if (err) throw err;
     console.log("Database tidied up\n");
@@ -312,7 +314,6 @@ const socketServer = new WebSocket.Server({
 
 //  Socket events
 socketServer.on("connection", (socketClient) => {
-  let checkupInterval;
   console.log("Client connected");
   console.log("client Set length: ", socketServer.clients.size);
   if (socketServer.clients.size == 1) {
@@ -320,7 +321,7 @@ socketServer.on("connection", (socketClient) => {
     streamConnect();
   }
   var initialData = [];
-  var sql = "SELECT url FROM cats limit 0,9";
+  var sql = "SELECT url FROM cats ORDER BY id DESC limit 0,9";
   pool.query(sql, function(err, result) {
     if (err) {
       console.log("Error at socketServer.on 'connection': \n");
