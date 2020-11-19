@@ -33,7 +33,9 @@ let nsfwModel,
   lastData = new Date(),
   timeout = 0,
   reconnecting = false,
-  checkupInterval;
+  checkupInterval,
+  connection,
+  instance;
 
 //  HTTPS server
 const server = https.createServer({ cert: cert, key: key, ca: ca }, app);
@@ -101,14 +103,14 @@ const setRules = async function() {
 
 //  Setup SQL watcher
 const sqlWatcher = async () => {
-  const connection = mysql.createConnection({
+  connection = mysql.createConnection({
     host: "localhost",
     user: "root",
     password: "193267abC",
     database: "twit"
   });
 
-  const instance = new MySQLEvents(connection, {
+  instance = new MySQLEvents(connection, {
     serverId: Math.floor(Math.random() * 1320984),
     startAtEnd: true // to record only the new binary logs, if set to false
     //  or you didn't provide it, all the events will be console.logged
@@ -132,6 +134,8 @@ const sqlWatcher = async () => {
   instance.on(MySQLEvents.EVENTS.CONNECTION_ERROR, (error) => {
     console.log(error);
     console.log("SQL watcher conneciton died, reconnecting...");
+    connection = null;
+    instance = null;
     sqlWatcher().then(() => {
       console.log("SQL watcher reestablished!");
     });
@@ -175,7 +179,7 @@ const checkup = function() {
 
 //  Reconnection logic (to twitter server)
 const reconnect = async () => {
-  if (reconnecting == false) {
+  if (!reconnecting) {
     reconnecting = true;
     timeout++;
     try {
@@ -293,6 +297,7 @@ const streamConnect = function() {
   stream.on("header", (code) => {
     if (code == 200) {
       console.log("Connected to the twitter server.");
+      reconnecting = false;
       timeout = 0;
     }
     if (code == 429) {
@@ -317,11 +322,11 @@ const socketServer = new WebSocket.Server({
 
 //  Socket events
 socketServer.on("connection", (socketClient) => {
-  console.log("Client connected");
+  console.log(`Client connected at ${new Date()}`);
   console.log("client Set length: ", socketServer.clients.size);
   if (socketServer.clients.size == 1) {
     checkupInterval = setInterval(checkup, 180000);
-    if(!reconnecting){
+    if (!reconnecting) {
       stream = streamConnect();
     }
   }
@@ -345,7 +350,7 @@ socketServer.on("connection", (socketClient) => {
   });
 
   //  When the client closes the connection
-  socketClient.on("close", (socketClient) => {
+  socketClient.on("close", () => {
     console.log("A client closed their connection");
     console.log("Number of clients: ", socketServer.clients.size);
     if (socketServer.clients.size == 0) {
