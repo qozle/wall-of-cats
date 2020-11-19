@@ -1,20 +1,30 @@
 <template>
   <div class="container-fluid" id="twitt-display">
     <ul class="row mx-auto" id="twitt-row">
-      <li v-for="image in images" class="col-4 list-item" :key="image.id">
+      <li v-for="tweet in tweets" class="col-4 list-item" :key="tweet.id">
         <transition name="fade" mode="out-in">
-          <img
-            :src="image.aUrl"
-            v-if="image.aShow"
-            class="cat-image"
-            :key="image.id + 'a'"
-          />
-          <img
-            :src="image.bUrl"
+          <a
+            class="cat-link"
+            v-if="tweet.aShow"
+            :href="
+              `https://twitter.com/${tweet.aTweetName}/status/${tweet.aTweetId}`
+            "
+            :key="`${tweet.id}linkA`"
+            target="_blank"
+          >
+            <img :src="tweet.aUrl" :key="tweet.id + 'a'" class="cat-image" />
+          </a>
+          <a
+            class="cat-link"
             v-else
-            class="cat-image"
-            :key="image.id + 'b'"
-          />
+            :href="
+              `https://twitter.com/${tweet.bTweetName}/status/${tweet.bTweetId}`
+            "
+            :key="`${tweet.id}linkB`"
+            target="_blank"
+          >
+            <img :src="tweet.bUrl" class="cat-image" :key="tweet.id + 'b'" />
+          </a>
         </transition>
       </li>
     </ul>
@@ -27,7 +37,7 @@ export default {
   data: function() {
     return {
       likes: 0,
-      images: [],
+      tweets: [],
       ws: ""
     };
   },
@@ -40,41 +50,47 @@ export default {
     };
 
     this.ws.onmessage = async (event) => {
-      var data = JSON.parse(event.data);
+      let data = JSON.parse(event.data);
       switch (data.type) {
         case "update":
-          //        console.log(JSON.parse(event.data));
           //        console.log('we got a message: ');
           var newIndex = Math.floor(Math.random() * 9);
           //            console.log(newIndex);
           //            console.log(self.images[newIndex]);
 
-          if (self.images[newIndex].aShow) {
-            self.images[newIndex].bUrl = data.data.url;
-            self.images[newIndex].aShow = false;
+          if (self.tweets[newIndex].aShow) {
+            self.tweets[newIndex].bUrl = data.data.url;
+            self.tweets[newIndex].bTweetName = data.data.tweet_name;
+            self.tweets[newIndex].bTweetId = data.data.tweet_id;
+            self.tweets[newIndex].aShow = false;
           } else {
-            self.images[newIndex].aUrl = data.data.url;
-            self.images[newIndex].aShow = true;
+            self.tweets[newIndex].aUrl = data.data.url;
+            self.tweets[newIndex].aTweetName = data.data.tweet_name;
+            self.tweets[newIndex].aTweetId = data.data.tweet_id;
+            self.tweets[newIndex].aShow = true;
           }
           break;
         case "initialData":
-          data.data.forEach(function(currentValue, index) {
-            self.images.push({
+          data.data.forEach(function(tweetInfo, index) {
+            self.tweets.push({
               aShow: true,
               bShow: false,
-              aUrl: currentValue,
+              aUrl: tweetInfo.url,
+              aTweetName: tweetInfo.tweet_name,
+              aTweetId: tweetInfo.tweet_id,
               bUrl: "",
-              id: "image" + String(index),
+              bTweetName: "",
+              bTWeetId: "",
+              id: "image" + String(index)
             });
           });
-          // console.table(self.images);
           break;
       }
     };
   },
   beforeDestroy: function() {
     this.ws.close();
-  },
+  }
 };
 </script>
 
@@ -103,6 +119,12 @@ export default {
 .list-item {
   list-style-type: none;
   padding: 0;
+  transition: 500ms;
+}
+
+.list-item:hover {
+  transform: scale(1.1);
+  z-index: 10000000000000;
 }
 
 /* EXTRA SMALL DEVICES (PORTRAIT PHONES, <576px)*/

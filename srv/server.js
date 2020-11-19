@@ -248,7 +248,15 @@ const streamConnect = function() {
         //  If there's media data, put it in the DB
       } else if (JSON.parse(data).includes) {
         lastData = new Date();
-        let media = JSON.parse(data).includes.media[0];
+        let tweetData = JSON.parse(data);
+        let media = tweetData.includes.media[0];
+        let userInfo = await needle("get", `https://api.twitter.com/2/tweets/${tweetData.data.id}`+"?expansions=author_id", {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        })
+        let tweet_name = userInfo.body.includes.users[0].username;
+        let tweet_id = userInfo.body.data.id
         needle("get", media.url).then(async (resp) => {
           //  This could be passed to a new thread ??
           const image = await tf.node.decodeImage(resp.body, 3);
@@ -263,9 +271,9 @@ const streamConnect = function() {
             areThereCats(catObjects)
           ) {
             var sqlInsert =
-              "INSERT INTO cats (media_key, type, url) VALUES (?,?,?)";
-            var valuesInsert = [[media.media_key], [media.type], [media.url]];
-            pool.query(sqlInsert, valuesInsert, (err) => {
+              "INSERT INTO cats (media_key, type, url, tweet_id, tweet_name) VALUES (?,?,?,?,?)";
+            var valuesInsert = [[media.media_key], [media.type], [media.url], [tweet_id], [tweet_name]];
+            pool.query(sqlInsert, valuesInsert, (err, result) => {
               if (err) {
                 console.log("Data not inserted, error:");
                 console.log(err);
@@ -330,8 +338,8 @@ socketServer.on("connection", (socketClient) => {
       stream = streamConnect();
     }
   }
-  var initialData = [];
-  var sql = "SELECT url FROM cats ORDER BY id DESC limit 0,9";
+  let initialData = [];
+  let sql = "SELECT url, tweet_name, tweet_id FROM cats ORDER BY id DESC limit 0,9";
   pool.query(sql, function(err, result) {
     if (err) {
       console.log("Error at socketServer.on 'connection': \n");
@@ -339,7 +347,8 @@ socketServer.on("connection", (socketClient) => {
     }
     console.log("Initial data sent");
     result.forEach(function(value, index, array) {
-      initialData.push(array[index].url);
+      let tweetInfo = {url: value.url, tweet_name: value.tweet_name, tweet_id: value.tweet_id}
+      initialData.push(tweetInfo);
     });
     socketClient.send(
       JSON.stringify({

@@ -1,7 +1,7 @@
 import Vue from "vue";
 import VueRouter from "vue-router";
 import Home from "../views/Home.vue";
-import NotFoundComponent from "../views/NotFoundComponent.vue"
+import NotFoundView from "../views/NotFoundView.vue"
 import { BootstrapVue, IconsPlugin } from "bootstrap-vue";
 
 Vue.use(VueRouter);
@@ -25,8 +25,8 @@ const routes = [
   }, 
   {
     path: '*',
-    name: "NotFoundComponent",
-    component: NotFoundComponent
+    name: "NotFoundView",
+    component: NotFoundView
   }
 ];
 
