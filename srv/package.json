@@ -12,8 +12,10 @@
   "license": "ISC",
   "dependencies": {
     "@rodrigogs/mysql-events": "^0.6.0",
-    "@tensorflow-models/coco-ssd": "^2.1.0",
-    "@tensorflow/tfjs-node": "^2.1.0",
+    "@tensorflow/tfjs": "^2.7.0",
+    "@tensorflow/tfjs-converter": "^2.7.0",
+    "@tensorflow/tfjs-core": "^2.7.0",
+    "@tensorflow/tfjs-node": "^2.7.0",
     "cors": "^2.8.5",
     "cross-env": "^7.0.2",
     "dotenv": "^8.2.0",
@@ -22,6 +24,7 @@
     "mysql": "^2.18.1",
     "needle": "^2.5.2",
     "nsfwjs": "^2.2.0",
+    "tensorflow-models": "github:tensorflow/tfjs-models",
     "ws": "^7.3.1"
   }
 }

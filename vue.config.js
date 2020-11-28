@@ -1,7 +1,3 @@
 module.exports = {
-  publicPath: "/wall-of-cats/",
-
-  devServer: {
-    //    https: true
-  }
+  publicPath: "/wall-of-cats/"
 };

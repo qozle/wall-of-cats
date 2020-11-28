@@ -43,8 +43,17 @@ export default {
   },
   methods: {},
   mounted: function() {
+    console.log(process.env.NODE_ENV);
     var self = this;
-    this.ws = new WebSocket("wss://01014.org:3000");
+    switch (process.env.NODE_ENV) {
+      case "development":
+        self.ws = new WebSocket("wss://localhost:3000");
+        break;
+      case "production":
+        self.ws = new WebSocket("wss://01014.org:3000");
+        break;
+    }
+
     this.ws.onopen = () => {
       console.log("Now connected");
     };
