@@ -6,8 +6,8 @@ const WebSocket = require("ws");
 const needle = require("needle");
 require("dotenv").config();
 const tf = require("@tensorflow/tfjs-node");
-// const cocoSsd = require("@tensorflow-models/coco-ssd");
-const cocoSsd = require("tensorflow-models")
+const cocoSsd = require("@tensorflow-models/coco-ssd");
+// const cocoSsd = require("tensorflow-models");
 tf.enableProdMode();
 const nsfwjs = require("nsfwjs");
 const mysql = require("mysql");
@@ -42,9 +42,9 @@ switch (process.env.NODE_ENV) {
 // Rules for how to filter the stream of tweets.
 const rules = [
   {
-    "value":
+    value:
       "(cat OR cats OR kitty OR kitten) has:images -is:quote -is:retweet -has:mentions",
-    "tag": "catRules"
+    tag: "catRules"
   }
 ];
 let nsfwModel,
@@ -118,7 +118,7 @@ const setRules = async function() {
   const response = await needle("post", rulesURL, data, {
     headers: {
       "content-type": "application/json",
-      "authorization": `Bearer ${token}`
+      authorization: `Bearer ${token}`
     }
   }).catch((err) => {
     console.log(err);
@@ -353,7 +353,7 @@ const streamConnect = function() {
             [tweet_id],
             [tweet_name]
           ];
-          pool.query(sqlInsert, valuesInsert, (err, result) => {
+          pool.query(sqlInsert, valuesInsert, (err) => {
             if (err) {
               console.log("Data not inserted, error:");
               console.log(err);
@@ -431,7 +431,7 @@ socketServer.on("connection", (socketClient) => {
       console.log(err);
     }
     console.log("Initial data sent");
-    result.forEach(function(value, index, array) {
+    result.forEach(function(value) {
       let tweetInfo = {
         url: value.url,
         tweet_name: value.tweet_name,
@@ -474,13 +474,15 @@ socketServer.on("connection", (socketClient) => {
 //  Preload, start the server
 (async () => {
   // Gets the complete list of rules currently applied to the stream
-  let p1 = getAllRules().then((currentRules) => {
-    console.log(currentRules);
-    deleteAllRules(currentRules);
-  }).catch((err)=>{
-    console.log("error with getting / deleting rules:")
-    console.log(err)
-  })
+  let p1 = getAllRules()
+    .then((currentRules) => {
+      console.log(currentRules);
+      deleteAllRules(currentRules);
+    })
+    .catch((err) => {
+      console.log("error with getting / deleting rules:");
+      console.log(err);
+    });
   // let p2 = deleteAllRules(rules);
   let p3 = setRules();
   let p4;
